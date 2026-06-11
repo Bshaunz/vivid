@@ -7,6 +7,8 @@
  */
 
 export type Pillar = "Health" | "Fitness" | "Finances";
+/** completed = 1.0, rest = 0.5, missed = 0.0 in the Fitness score. */
+export type TrainingStatus = "completed" | "missed" | "rest";
 export type FrequencyType = "daily" | "weekly" | "monthly";
 export type GoalType = "metric" | "habit";
 export type MetricDirection = "above" | "below";
@@ -55,7 +57,7 @@ export interface DailyLog {
 
   // Evening Log — Output State
   deep_work_hours: number | null;
-  training_done: boolean | null;
+  training_status: TrainingStatus | null;
   macro_adherence: boolean | null;
   caloric_variance_pct: number | null;
   discretionary_spend: number | null;
@@ -82,7 +84,7 @@ export interface MorningLogInput {
 /** Required evening fields are non-optional — the type enforces completeness. */
 export interface EveningLogInput {
   deep_work_hours: number;
-  training_done: boolean;
+  training_status: TrainingStatus;
   macro_adherence: boolean;
   discretionary_spend: number;
   caloric_variance_pct?: number | null;

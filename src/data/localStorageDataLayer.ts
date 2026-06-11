@@ -91,7 +91,7 @@ function emptyDailyLog(date: string): DailyLog {
     caffeine_delay: null,
     morning_done: false,
     deep_work_hours: null,
-    training_done: null,
+    training_status: null,
     macro_adherence: null,
     caloric_variance_pct: null,
     discretionary_spend: null,
@@ -200,6 +200,10 @@ export class LocalStorageDataLayer implements DataLayer {
 
   async saveEveningLog(date: string, input: EveningLogInput): Promise<DailyLog> {
     assert(inRange(input.deep_work_hours, 0, 24), "deep_work_hours must be 0–24");
+    assert(
+      input.training_status === "completed" || input.training_status === "missed" || input.training_status === "rest",
+      "training_status must be completed | missed | rest",
+    );
     assert(input.discretionary_spend >= 0, "discretionary_spend must be >= 0");
     if (input.workout_rpe != null) assert(inRange(input.workout_rpe, 1, 10), "workout_rpe must be 1–10");
     if (input.screen_time_hours != null)
@@ -207,7 +211,7 @@ export class LocalStorageDataLayer implements DataLayer {
 
     return this.upsertDailyLog(date, (log) => {
       log.deep_work_hours = input.deep_work_hours;
-      log.training_done = input.training_done;
+      log.training_status = input.training_status;
       log.macro_adherence = input.macro_adherence;
       log.caloric_variance_pct = input.caloric_variance_pct ?? null;
       log.discretionary_spend = input.discretionary_spend;
@@ -321,7 +325,7 @@ export class LocalStorageDataLayer implements DataLayer {
         weights.length > 0
           ? Math.round((weights.reduce((s, w) => s + w, 0) / weights.length) * 100) / 100
           : null,
-      total_training_sessions: logs.filter((l) => l.training_done === true).length,
+      total_training_sessions: logs.filter((l) => l.training_status === "completed").length,
       morning_logs_completed: logs.filter((l) => l.morning_done).length,
       evening_logs_completed: logs.filter((l) => l.evening_done).length,
     };

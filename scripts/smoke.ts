@@ -13,7 +13,7 @@ const store = new Map<string, string>();
 };
 
 const { LocalStorageDataLayer } = await import("../src/data/localStorageDataLayer");
-const { todayISO, weekStartISO } = await import("../src/lib/dates");
+const { todayISO, weekStartISO, addDays } = await import("../src/lib/dates");
 
 const dl = new LocalStorageDataLayer();
 const today = todayISO();
@@ -43,7 +43,7 @@ const habit = await dl.createHabit({
 
 await dl.saveEveningLog(today, {
   deep_work_hours: 3.5,
-  training_done: true,
+  training_status: "completed",
   macro_adherence: false,
   discretionary_spend: 42.5,
   caloric_variance_pct: -10,
@@ -61,7 +61,7 @@ assert.equal(log.morning_done, true);
 assert.equal(log.evening_done, true);
 assert.equal(log.sleep_total_minutes, 7 * 60 + 45, "generated column mirrored");
 assert.equal(log.bodyweight, 185.2);
-assert.equal(log.training_done, true);
+assert.equal(log.training_status, "completed");
 assert.equal(log.macro_adherence, false);
 assert.equal(log.caloric_variance_pct, -10);
 assert.equal(log.discretionary_spend, 42.5);
@@ -76,12 +76,24 @@ const comps = await dl.getHabitCompletions(today, today);
 assert.equal(comps.length, 1);
 assert.equal(comps[0].completed, true);
 
-// Weekly rollup sees today
+// Rest day: log a second day in the same ISO week with training_status=rest.
+// It must count as a completed evening log but NOT as a training session.
+const restDay = weekStartISO(today) === today ? addDays(today, 1) : addDays(today, -1);
+await dl.saveEveningLog(restDay, {
+  deep_work_hours: 1,
+  training_status: "rest",
+  macro_adherence: true,
+  discretionary_spend: 0,
+});
+const restLog = await dl.getDailyLog(restDay);
+assert.equal(restLog?.training_status, "rest");
+
+// Weekly rollup: rest day excluded from training sessions
 const rollup = await dl.getWeeklyRollup(weekStartISO(today));
 assert.equal(rollup.avg_bodyweight_7d, 185.2);
-assert.equal(rollup.total_training_sessions, 1);
+assert.equal(rollup.total_training_sessions, 1, "rest day must not count as a training session");
 assert.equal(rollup.morning_logs_completed, 1);
-assert.equal(rollup.evening_logs_completed, 1);
+assert.equal(rollup.evening_logs_completed, 2);
 
 // Constraint mirror: invalid input must throw, not silently store
 await assert.rejects(
@@ -96,11 +108,20 @@ await assert.rejects(
 await assert.rejects(
   dl.saveEveningLog(today, {
     deep_work_hours: 30,
-    training_done: true,
+    training_status: "completed",
     macro_adherence: true,
     discretionary_spend: 0,
   }),
   /deep_work_hours/,
 );
+await assert.rejects(
+  dl.saveEveningLog(today, {
+    deep_work_hours: 1,
+    training_status: "yes" as never, // simulates a bad payload reaching the layer
+    macro_adherence: true,
+    discretionary_spend: 0,
+  }),
+  /training_status/,
+);
 
-console.log("SMOKE PASS — morning/evening round-trip, single row per day, rollup, null semantics, constraint rejection all verified");
+console.log("SMOKE PASS — round-trip, single row per day, rest-day rollup semantics, null semantics, constraint rejection all verified");

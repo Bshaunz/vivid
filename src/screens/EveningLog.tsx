@@ -3,7 +3,7 @@ import { useForm, type UseFormRegisterReturn } from "react-hook-form";
 import { useApp } from "@/context/AppContext";
 import { NumberStepper } from "@/components/NumberStepper";
 import { todayISO } from "@/lib/dates";
-import type { DailyLog, Habit } from "@/types/domain";
+import type { DailyLog, Habit, TrainingStatus } from "@/types/domain";
 
 /**
  * Evening Log — Output State (~90 sec target).
@@ -20,7 +20,7 @@ import type { DailyLog, Habit } from "@/types/domain";
  */
 
 interface EveningFormValues {
-  training_done: "yes" | "no" | null;
+  training_status: TrainingStatus | null;
   macro_adherence: "yes" | "no" | null;
   deep_work_hours: string;
   discretionary_spend: string;
@@ -83,7 +83,12 @@ function EveningComplete({ log, onEdit }: { log: DailyLog; onEdit: () => void })
 
       <section className="grid grid-cols-3 gap-3">
         <SummaryCard label="Deep work" value={`${log.deep_work_hours}h`} />
-        <SummaryCard label="Training" value={log.training_done ? "Yes" : "No"} />
+        <SummaryCard
+          label="Training"
+          value={
+            log.training_status === "completed" ? "Yes" : log.training_status === "rest" ? "Rest" : "No"
+          }
+        />
         <SummaryCard label={`Spend (${currency})`} value={log.discretionary_spend ?? "--"} />
       </section>
 
@@ -132,8 +137,7 @@ function EveningForm({
     formState: { errors, isSubmitting },
   } = useForm<EveningFormValues>({
     defaultValues: {
-      training_done:
-        fromExisting && existing?.training_done != null ? (existing.training_done ? "yes" : "no") : null,
+      training_status: fromExisting && existing?.training_status != null ? existing.training_status : null,
       macro_adherence:
         fromExisting && existing?.macro_adherence != null ? (existing.macro_adherence ? "yes" : "no") : null,
       deep_work_hours:
@@ -160,7 +164,7 @@ function EveningForm({
   const onSubmit = handleSubmit(async (v) => {
     await data.saveEveningLog(todayISO(), {
       deep_work_hours: parseFloat(v.deep_work_hours),
-      training_done: v.training_done === "yes",
+      training_status: v.training_status as TrainingStatus, // required:true guarantees non-null
       macro_adherence: v.macro_adherence === "yes",
       discretionary_spend: parseFloat(v.discretionary_spend),
       caloric_variance_pct: v.caloric_variance_pct === "" ? null : parseFloat(v.caloric_variance_pct),
@@ -183,16 +187,26 @@ function EveningForm({
       </header>
 
       <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col gap-4">
-        {/* 1 — Binary toggles first */}
-        <BinaryToggleRow
-          label="Training completed"
-          hasError={!!errors.training_done}
-          registration={register("training_done", { required: true })}
+        {/* 1 — Toggles first. Training is 3-state: a planned rest day must
+            never be recorded as a miss. */}
+        <SegmentToggleRow
+          label="Training"
+          hasError={!!errors.training_status}
+          registration={register("training_status", { required: true })}
+          options={[
+            { value: "completed", label: "Yes" },
+            { value: "missed", label: "No" },
+            { value: "rest", label: "Rest" },
+          ]}
         />
-        <BinaryToggleRow
+        <SegmentToggleRow
           label="Macro adherence"
           hasError={!!errors.macro_adherence}
           registration={register("macro_adherence", { required: true })}
+          options={[
+            { value: "yes", label: "Yes" },
+            { value: "no", label: "No" },
+          ]}
         />
 
         {/* 2 — Deep work hours: numeric by schema (fitness score = min(h/4, 1)) */}
@@ -279,14 +293,16 @@ function EveningForm({
   );
 }
 
-function BinaryToggleRow({
+function SegmentToggleRow({
   label,
   hasError,
   registration,
+  options,
 }: {
   label: string;
   hasError: boolean;
   registration: UseFormRegisterReturn;
+  options: { value: string; label: string }[];
 }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-[14px] border border-card-border bg-card py-2 pl-4 pr-2">
@@ -295,13 +311,13 @@ function BinaryToggleRow({
         {hasError && <span className="label block text-white">required</span>}
       </span>
       <div className="flex gap-1">
-        {(["yes", "no"] as const).map((opt) => (
+        {options.map((opt) => (
           <label
-            key={opt}
-            className="flex h-11 w-16 cursor-pointer items-center justify-center rounded-[30px] border border-card-border text-xs font-semibold uppercase text-white/50 has-[:checked]:border-accent has-[:checked]:bg-accent has-[:checked]:text-white"
+            key={opt.value}
+            className="flex h-11 w-14 cursor-pointer items-center justify-center rounded-[30px] border border-card-border text-xs font-semibold uppercase text-white/50 has-[:checked]:border-accent has-[:checked]:bg-accent has-[:checked]:text-white"
           >
-            <input type="radio" value={opt} className="sr-only" {...registration} />
-            {opt}
+            <input type="radio" value={opt.value} className="sr-only" {...registration} />
+            {opt.label}
           </label>
         ))}
       </div>

@@ -10,6 +10,9 @@
 -- the AI synthesis reads is guaranteed clean.
 -- ----------------------------------------------------------------------------
 create type pillar_type        as enum ('Health', 'Fitness', 'Finances');
+-- Three states by design: scoring maps completed=1.0 / rest=0.5 / missed=0.0,
+-- so a planned rest day never reads as a discipline failure downstream.
+create type training_status    as enum ('completed', 'missed', 'rest');
 create type frequency_type     as enum ('daily', 'weekly', 'monthly');
 create type goal_type          as enum ('metric', 'habit');
 create type metric_direction   as enum ('above', 'below');
@@ -58,7 +61,7 @@ create table public.daily_logs (
 
     -- Evening Log — Output State (~90 sec)
     deep_work_hours      numeric(4,2) check (deep_work_hours is null or deep_work_hours between 0 and 24),
-    training_done        boolean,
+    training_status      training_status,
     macro_adherence      boolean,
     caloric_variance_pct numeric(6,2),
     discretionary_spend  numeric(10,2) check (discretionary_spend is null or discretionary_spend >= 0),
@@ -85,7 +88,7 @@ create table public.daily_logs (
     constraint evening_complete check (
         not evening_done or (
             deep_work_hours is not null
-            and training_done is not null
+            and training_status is not null
             and macro_adherence is not null
             and discretionary_spend is not null
         )
@@ -285,7 +288,7 @@ select
     user_id,
     (date_trunc('week', date))::date            as week_start,
     round(avg(bodyweight), 2)                   as avg_bodyweight_7d,
-    count(*) filter (where training_done)::smallint as total_training_sessions,
+    count(*) filter (where training_status = 'completed')::smallint as total_training_sessions,
     count(*) filter (where morning_done)        as morning_logs_completed,
     count(*) filter (where evening_done)        as evening_logs_completed
 from public.daily_logs

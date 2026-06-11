@@ -12,8 +12,13 @@ export default function App() {
   );
 
   return (
-    <div className="relative">
-      <div className="absolute right-5 top-6 z-10 flex gap-1">
+    <div>
+      {/* fixed (not absolute): survives the keyboard-driven scroll when the
+          bodyweight field autofocuses, and clears the notch via safe-area */}
+      <div
+        className="fixed right-4 z-50 flex gap-1"
+        style={{ top: "calc(env(safe-area-inset-top) + 12px)" }}
+      >
         {(["morning", "evening"] as const).map((t) => (
           <button
             key={t}
