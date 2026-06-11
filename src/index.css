@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+/* VIVID design tokens — Design Rules from CLAUDE.md, defined once. */
+@theme {
+  --color-bg: #000000;
+  --color-card: #141414;
+  --color-card-border: #222222;
+  --color-accent: #2a933c; /* positive deltas + active states only */
+  --color-accent2: #2a6093; /* AI insight cards + AI highlights only */
+  --color-label: #666666;
+
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+
+  --radius-card: 14px;
+  --radius-pill: 30px;
+  --radius-input: 8px;
+}
+
+html {
+  background: var(--color-bg);
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* iOS safe areas for standalone PWA */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* 11px, 0.1em letter-spacing, #666666, uppercase — per Design Rules */
+.label {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--color-label);
+  text-transform: uppercase;
+}
