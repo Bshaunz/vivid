@@ -16,7 +16,7 @@ import type {
   WeeklyLog,
   WeeklyLogInput,
   WeeklyRollup,
-} from "@/types/domain";
+} from "../types/domain";
 
 /**
  * DataLayer — the single contract between the UI and persistence.

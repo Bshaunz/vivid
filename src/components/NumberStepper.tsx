@@ -5,6 +5,7 @@ interface NumberStepperProps {
   registration: UseFormRegisterReturn;
   onDecrement: () => void;
   onIncrement: () => void;
+  inputMode?: "numeric" | "decimal";
 }
 
 /**
@@ -13,7 +14,13 @@ interface NumberStepperProps {
  * itself stays directly typeable with the numeric keypad — no native clock
  * scroll wheels anywhere.
  */
-export function NumberStepper({ label, registration, onDecrement, onIncrement }: NumberStepperProps) {
+export function NumberStepper({
+  label,
+  registration,
+  onDecrement,
+  onIncrement,
+  inputMode = "numeric",
+}: NumberStepperProps) {
   return (
     <div className="flex flex-1 flex-col gap-2">
       <span className="label text-center">{label}</span>
@@ -28,7 +35,7 @@ export function NumberStepper({ label, registration, onDecrement, onIncrement }:
         </button>
         <input
           type="text"
-          inputMode="numeric"
+          inputMode={inputMode}
           className="w-full min-w-0 bg-transparent text-center text-3xl font-bold outline-none"
           {...registration}
         />

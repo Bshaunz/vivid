@@ -17,8 +17,8 @@ import type {
   WeeklyLog,
   WeeklyLogInput,
   WeeklyRollup,
-} from "@/types/domain";
-import { todayISO } from "@/lib/dates";
+} from "../types/domain";
+import { todayISO } from "../lib/dates";
 
 /**
  * localStorage-backed DataLayer (MVP).
