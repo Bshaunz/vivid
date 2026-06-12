@@ -95,6 +95,33 @@ assert.equal(rollup.total_training_sessions, 1, "rest day must not count as a tr
 assert.equal(rollup.morning_logs_completed, 1);
 assert.equal(rollup.evening_logs_completed, 2);
 
+// Weekly review path (what WeeklyLog.onSubmit sends): rollup values are
+// persisted into the weekly_logs row alongside the manual inputs.
+const saved = await dl.saveWeeklyLog({
+  week_start: weekStartISO(today),
+  avg_bodyweight_7d: rollup.avg_bodyweight_7d,
+  total_training_sessions: rollup.total_training_sessions,
+  bodyweight_goal: 180,
+  capital_allocated: 500,
+  bottleneck_audit: "Evening logging slipped twice after late training.",
+  posts_published: null,
+  followers: null,
+  waitlist_signups: null,
+});
+const fetched = await dl.getWeeklyLog(weekStartISO(today));
+assert.ok(fetched, "weekly log exists");
+assert.equal(fetched.id, saved.id);
+assert.equal(fetched.avg_bodyweight_7d, 185.2, "rollup avg persisted");
+assert.equal(fetched.total_training_sessions, 1, "rollup sessions persisted");
+assert.equal(fetched.capital_allocated, 500);
+assert.equal(fetched.posts_published, null, "unused optional stays null");
+
+// Saving the same week again updates in place — one row per (user, week)
+await dl.saveWeeklyLog({ ...fetched, capital_allocated: 750 });
+const weeks = await dl.listWeeklyLogs();
+assert.equal(weeks.length, 1, "upsert, not duplicate");
+assert.equal(weeks[0].capital_allocated, 750);
+
 // Constraint mirror: invalid input must throw, not silently store
 await assert.rejects(
   dl.saveMorningLog(today, {
@@ -124,4 +151,4 @@ await assert.rejects(
   /training_status/,
 );
 
-console.log("SMOKE PASS — round-trip, single row per day, rest-day rollup semantics, null semantics, constraint rejection all verified");
+console.log("SMOKE PASS — daily round-trip, rest-day rollup semantics, weekly review persistence + upsert, null semantics, constraint rejection all verified");
