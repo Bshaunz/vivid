@@ -2,31 +2,28 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useApp } from "@/context/AppContext";
 import { isSunday, parseISODate, todayISO, weekStartISO } from "@/lib/dates";
-import type { WeeklyLog as WeeklyLogRow, WeeklyRollup } from "@/types/domain";
+import type { WeeklyLog as WeeklyLogRow, WeeklySummary } from "@/types/domain";
 
 /**
  * Weekly Log — Trajectory Review (Sunday, ~5 min).
  *
+ * v4 weekly_logs is just capital_allocated + bottleneck_audit. Bodyweight goal
+ * is a profile setting now (Settings), not logged here. The read-only anchors
+ * come from WeeklySummary: the week's bodyweight MEDIAN (never an average; raw
+ * dailies are never scored, §4), training sessions, and evenings logged.
+ *
  * Sunday-only per spec; other days show the countdown. In dev builds,
  * ?preview=1 unlocks the form for testing (stripped from production).
- *
- * Structure: read-only anchors from the rollup first (avg_bodyweight_7d,
- * total_training_sessions — the user sees their actual week before writing
- * anything), then bodyweight goal (carried forward from last week), capital
- * allocated, and the bottleneck audit. Auto-calculated values are persisted
- * into the weekly_logs row at submit, exactly like the backend will.
  */
 
 interface WeeklyFormValues {
-  bodyweight_goal: string;
   capital_allocated: string;
   bottleneck_audit: string;
 }
 
 interface Seed {
-  rollup: WeeklyRollup;
+  summary: WeeklySummary;
   existing: WeeklyLogRow | null;
-  carriedGoal: number | null;
 }
 
 export default function WeeklyLog() {
@@ -44,14 +41,12 @@ export default function WeeklyLog() {
     if (!ready) return;
     let cancelled = false;
     (async () => {
-      const [rollup, existing, allWeeks] = await Promise.all([
-        data.getWeeklyRollup(weekStart),
+      const [summary, existing] = await Promise.all([
+        data.getWeeklySummary(weekStart),
         data.getWeeklyLog(weekStart),
-        data.listWeeklyLogs(),
       ]);
       if (cancelled) return;
-      const prev = allWeeks.find((l) => l.week_start < weekStart);
-      setSeed({ rollup, existing, carriedGoal: prev?.bodyweight_goal ?? null });
+      setSeed({ summary, existing });
     })();
     return () => {
       cancelled = true;
@@ -65,7 +60,7 @@ export default function WeeklyLog() {
   if (!ready || !seed) return null;
 
   if (seed.existing && !editing) {
-    return <WeeklyComplete log={seed.existing} onEdit={() => setEditing(true)} />;
+    return <WeeklyComplete log={seed.existing} summary={seed.summary} onEdit={() => setEditing(true)} />;
   }
 
   return <WeeklyForm seed={seed} weekStart={weekStart} onSaved={() => setEditing(false)} />;
@@ -89,9 +84,51 @@ function WeeklyLocked({ today }: { today: string }) {
   );
 }
 
+// ── Read-only week anchors ───────────────────────────────────────────────────
+
+function AnchorGrid({ summary, unit }: { summary: WeeklySummary; unit: string }) {
+  const { profile } = useApp();
+  const goal = profile?.bodyweight_goal ?? null;
+  const bwDelta =
+    summary.median_bodyweight !== null && goal !== null
+      ? Math.round((summary.median_bodyweight - goal) * 10) / 10
+      : null;
+
+  return (
+    <section className="grid grid-cols-2 gap-3">
+      <div className="rounded-[14px] border border-card-border bg-card p-4">
+        <p className="label mb-1">Median bodyweight ({unit})</p>
+        <p className="text-3xl font-extrabold">{summary.median_bodyweight ?? "--"}</p>
+        <p className="mt-1 text-xs text-white/50">
+          {summary.median_bodyweight === null
+            ? "no samples this week"
+            : summary.low_confidence
+              ? `${summary.n_bw_samples} sample${summary.n_bw_samples === 1 ? "" : "s"} · low confidence`
+              : bwDelta !== null
+                ? `${bwDelta > 0 ? "+" : ""}${bwDelta} vs goal`
+                : `${summary.n_bw_samples} samples`}
+        </p>
+      </div>
+      <div className="rounded-[14px] border border-card-border bg-card p-4">
+        <p className="label mb-1">Training sessions</p>
+        <p className="text-3xl font-extrabold">{summary.training_sessions}</p>
+        <p className="mt-1 text-xs text-white/50">{summary.evenings_logged}/7 evenings logged</p>
+      </div>
+    </section>
+  );
+}
+
 // ── Completed state ──────────────────────────────────────────────────────────
 
-function WeeklyComplete({ log, onEdit }: { log: WeeklyLogRow; onEdit: () => void }) {
+function WeeklyComplete({
+  log,
+  summary,
+  onEdit,
+}: {
+  log: WeeklyLogRow;
+  summary: WeeklySummary;
+  onEdit: () => void;
+}) {
   const { profile } = useApp();
   const currency = profile?.currency ?? "CAD";
   const unit = profile?.unit_pref ?? "lbs";
@@ -103,10 +140,11 @@ function WeeklyComplete({ log, onEdit }: { log: WeeklyLogRow; onEdit: () => void
         <h1 className="text-2xl font-extrabold tracking-tight">Week reviewed</h1>
       </header>
 
-      <section className="grid grid-cols-3 gap-3">
-        <SummaryCard label={`Avg BW (${unit})`} value={log.avg_bodyweight_7d ?? "--"} />
-        <SummaryCard label="Sessions" value={log.total_training_sessions ?? "--"} />
-        <SummaryCard label={`Capital (${currency})`} value={log.capital_allocated ?? "--"} />
+      <AnchorGrid summary={summary} unit={unit} />
+
+      <section className="rounded-[14px] border border-card-border bg-card p-4">
+        <p className="label mb-1">Capital allocated ({currency})</p>
+        <p className="text-2xl font-bold">{log.capital_allocated}</p>
       </section>
 
       {log.bottleneck_audit && (
@@ -127,15 +165,6 @@ function WeeklyComplete({ log, onEdit }: { log: WeeklyLogRow; onEdit: () => void
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-[14px] border border-card-border bg-card p-3">
-      <p className="label mb-1">{label}</p>
-      <p className="text-xl font-bold">{value}</p>
-    </div>
-  );
-}
-
 // ── Form ─────────────────────────────────────────────────────────────────────
 
 function WeeklyForm({
@@ -150,13 +179,7 @@ function WeeklyForm({
   const { data, profile, refresh } = useApp();
   const currency = profile?.currency ?? "CAD";
   const unit = profile?.unit_pref ?? "lbs";
-  const { rollup, existing, carriedGoal } = seed;
-
-  const goalSeed = existing?.bodyweight_goal ?? carriedGoal;
-  const bwDelta =
-    rollup.avg_bodyweight_7d !== null && goalSeed !== null
-      ? Math.round((rollup.avg_bodyweight_7d - goalSeed) * 10) / 10
-      : null;
+  const { summary, existing } = seed;
 
   const {
     register,
@@ -164,7 +187,6 @@ function WeeklyForm({
     formState: { errors, isSubmitting },
   } = useForm<WeeklyFormValues>({
     defaultValues: {
-      bodyweight_goal: goalSeed !== null ? String(goalSeed) : "",
       capital_allocated: existing?.capital_allocated != null ? String(existing.capital_allocated) : "",
       bottleneck_audit: existing?.bottleneck_audit ?? "",
     },
@@ -173,15 +195,8 @@ function WeeklyForm({
   const onSubmit = handleSubmit(async (v) => {
     await data.saveWeeklyLog({
       week_start: weekStart,
-      // auto-calculated values persisted at review time, matching v_weekly_rollup
-      avg_bodyweight_7d: rollup.avg_bodyweight_7d,
-      total_training_sessions: rollup.total_training_sessions,
-      bodyweight_goal: v.bodyweight_goal === "" ? null : parseFloat(v.bodyweight_goal),
       capital_allocated: parseFloat(v.capital_allocated),
-      bottleneck_audit: v.bottleneck_audit.trim(),
-      posts_published: existing?.posts_published ?? null,
-      followers: existing?.followers ?? null,
-      waitlist_signups: existing?.waitlist_signups ?? null,
+      bottleneck_audit: v.bottleneck_audit.trim() === "" ? null : v.bottleneck_audit.trim(),
     });
     await refresh();
     onSaved();
@@ -195,52 +210,20 @@ function WeeklyForm({
       </header>
 
       {/* 1 — Read-only anchors: the week as it actually happened */}
-      <section className="grid grid-cols-2 gap-3">
-        <div className="rounded-[14px] border border-card-border bg-card p-4">
-          <p className="label mb-1">Avg bodyweight ({unit})</p>
-          <p className="text-3xl font-extrabold">{rollup.avg_bodyweight_7d ?? "--"}</p>
-          {bwDelta !== null && (
-            <p className="mt-1 text-xs text-white/50">
-              {bwDelta > 0 ? "+" : ""}
-              {bwDelta} vs goal
-            </p>
-          )}
-        </div>
-        <div className="rounded-[14px] border border-card-border bg-card p-4">
-          <p className="label mb-1">Training sessions</p>
-          <p className="text-3xl font-extrabold">{rollup.total_training_sessions}</p>
-          <p className="mt-1 text-xs text-white/50">
-            {rollup.evening_logs_completed}/7 evenings logged
-          </p>
-        </div>
-      </section>
+      <AnchorGrid summary={summary} unit={unit} />
 
       <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col gap-4">
-        {/* 2 — Bodyweight goal, carried forward from last week */}
-        <div className="flex items-center justify-between gap-3 rounded-[14px] border border-card-border bg-card py-2 pl-4 pr-2">
-          <span className="text-sm font-semibold">Bodyweight goal ({unit})</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            placeholder="--"
-            className="h-11 w-24 rounded-[8px] border border-card-border bg-transparent text-center text-lg font-bold outline-none placeholder:text-white/20 focus:border-white/40"
-            {...register("bodyweight_goal", {
-              validate: (v) => v === "" || (Number.isFinite(parseFloat(v)) && parseFloat(v) > 0),
-            })}
-          />
-        </div>
-
-        {/* 3 — Capital allocated: large decimal keypad */}
+        {/* 2 — Capital allocated: large decimal keypad */}
         <div className="flex flex-col gap-2">
           <span className="label text-center">
             Capital allocated ({currency})
-            {errors.capital_allocated && <span className="text-white"> — required</span>}
+            {errors.capital_allocated && <span className="text-negative"> — required</span>}
           </span>
           <input
             type="text"
             inputMode="decimal"
             placeholder="0.00"
-            className="h-16 w-full rounded-[14px] border border-card-border bg-card text-center text-4xl font-extrabold outline-none placeholder:text-white/20 focus:border-white/40"
+            className="h-16 w-full rounded-[14px] border border-card-border bg-card text-center text-4xl font-extrabold outline-none placeholder:text-white/20 focus:border-accent"
             {...register("capital_allocated", {
               required: true,
               validate: (v) => Number.isFinite(parseFloat(v)) && parseFloat(v) >= 0,
@@ -248,23 +231,18 @@ function WeeklyForm({
           />
         </div>
 
-        {/* 4 — Bottleneck audit: fills remaining space, screen never scrolls */}
+        {/* 3 — Bottleneck audit: fills remaining space, screen never scrolls */}
         <div className="flex min-h-0 flex-1 flex-col gap-2">
-          <span className="label text-center">
-            Bottleneck audit
-            {errors.bottleneck_audit && <span className="text-white"> — required</span>}
-          </span>
+          <span className="label text-center">Bottleneck audit · optional</span>
           <textarea
+            maxLength={1000}
             placeholder="What was your primary point of friction this week?"
-            className="min-h-0 w-full flex-1 resize-none rounded-[8px] border border-card-border bg-card p-3 text-sm outline-none placeholder:text-white/20 focus:border-white/40"
-            {...register("bottleneck_audit", {
-              required: true,
-              validate: (v) => v.trim().length > 0,
-            })}
+            className="min-h-0 w-full flex-1 resize-none rounded-[8px] border border-card-border bg-card p-3 text-sm outline-none placeholder:text-white/20 focus:border-accent"
+            {...register("bottleneck_audit")}
           />
         </div>
 
-        {/* 5 — Massive submit pinned to the bottom */}
+        {/* 4 — Massive submit pinned to the bottom */}
         <button
           type="submit"
           disabled={isSubmitting}

@@ -6,3 +6,12 @@ dev-dist
 .env.*
 !.env.example
 .DS_Store
+
+# Backend (Python)
+__pycache__/
+*.pyc
+.venv/
+backend/vivid_dev.db
+# Private synthesis system prompt — never committed (§3.2)
+prompts/
+*.prompt.txt

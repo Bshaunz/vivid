@@ -1,0 +1,13 @@
+# Floors, not exact pins: Python 3.14 (released Oct 2025) needs cp314 wheels,
+# and the mid-2025 exact pins predate them — pydantic-core in particular ships
+# a Rust wheel per Python ABI. Floors let pip resolve a 3.14-compatible build
+# while staying on the same major lines the code targets.
+fastapi>=0.115.12
+uvicorn[standard]>=0.34.2
+sqlalchemy>=2.0.41
+alembic>=1.16.1
+pydantic>=2.11.5
+pydantic-settings>=2.9.1
+slowapi>=0.1.9
+PyJWT>=2.10.1
+anthropic>=0.52.0

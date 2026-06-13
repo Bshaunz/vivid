@@ -1,8 +1,6 @@
 import type {
   AISynthesis,
-  CustomMetric,
-  CustomMetricEntry,
-  CustomMetricInput,
+  BodyweightEntry,
   DailyLog,
   EveningLogInput,
   Goal,
@@ -11,11 +9,11 @@ import type {
   HabitCompletion,
   HabitInput,
   MorningLogInput,
-  SynthesisType,
   UserProfile,
+  WeeklyBodyweight,
   WeeklyLog,
   WeeklyLogInput,
-  WeeklyRollup,
+  WeeklySummary,
 } from "../types/domain";
 
 /**
@@ -26,8 +24,8 @@ import type {
  * where the current backing store is synchronous, so swapping in the
  * FastAPI/Supabase implementation changes zero call sites.
  *
- * All `date` parameters are `YYYY-MM-DD`. All `week_start` parameters are
- * the ISO Monday of the week, matching the weekly_logs check constraint.
+ * All `date` parameters are `YYYY-MM-DD`. All `week_start` parameters are the
+ * ISO Monday of the week, matching the weekly_logs check constraint.
  */
 export interface DataLayer {
   // ── User ─────────────────────────────────────────────────────────────────
@@ -48,6 +46,16 @@ export interface DataLayer {
   /** Upserts the day row, sets evening fields, marks evening_done. */
   saveEveningLog(date: string, input: EveningLogInput): Promise<DailyLog>;
 
+  // ── Bodyweight (separate entity: many per day; scored only as weekly median) ─
+  addBodyweightEntry(value: number, loggedAt?: string): Promise<BodyweightEntry>;
+  /** Inclusive range by calendar day of logged_at, ascending. */
+  getBodyweightEntries(fromDate: string, toDate: string): Promise<BodyweightEntry[]>;
+  /** Most recent sample, or null. Used as a placeholder hint, never prefilled. */
+  getLatestBodyweight(): Promise<BodyweightEntry | null>;
+  /** Median of the ISO week's samples — the only bodyweight value anything
+   *  scores or charts (§4). Null when the week has no samples. */
+  getWeeklyBodyweight(weekStart: string): Promise<WeeklyBodyweight | null>;
+
   // ── Habits ───────────────────────────────────────────────────────────────
   listHabits(opts?: { activeOnly?: boolean }): Promise<Habit[]>;
   createHabit(input: HabitInput): Promise<Habit>;
@@ -64,25 +72,16 @@ export interface DataLayer {
   getWeeklyLog(weekStart: string): Promise<WeeklyLog | null>;
   listWeeklyLogs(limit?: number): Promise<WeeklyLog[]>;
   saveWeeklyLog(input: WeeklyLogInput): Promise<WeeklyLog>;
-  /** Mirror of v_weekly_rollup: auto-calculated fields for the Sunday review. */
-  getWeeklyRollup(weekStart: string): Promise<WeeklyRollup>;
+  /** Read-only anchors for the Sunday review (median bw + sessions logged). */
+  getWeeklySummary(weekStart: string): Promise<WeeklySummary>;
 
-  // ── Goals ────────────────────────────────────────────────────────────────
+  // ── Goals (display-only) ───────────────────────────────────────────────────
   listGoals(opts?: { activeOnly?: boolean }): Promise<Goal[]>;
   createGoal(input: GoalInput): Promise<Goal>;
   updateGoal(id: number, patch: Partial<GoalInput>): Promise<Goal>;
   deleteGoal(id: number): Promise<void>;
 
   // ── AI syntheses ─────────────────────────────────────────────────────────
-  listSyntheses(opts?: { type?: SynthesisType; limit?: number }): Promise<AISynthesis[]>;
-  addSynthesis(type: SynthesisType, content: string): Promise<AISynthesis>;
-  /** Server-side cap support: on-demand syntheses generated today. */
-  countOnDemandToday(): Promise<number>;
-
-  // ── Custom metrics ───────────────────────────────────────────────────────
-  listCustomMetrics(): Promise<CustomMetric[]>;
-  createCustomMetric(input: CustomMetricInput): Promise<CustomMetric>;
-  deleteCustomMetric(id: number): Promise<void>;
-  setCustomMetricEntry(metricId: number, date: string, value: number): Promise<CustomMetricEntry>;
-  getCustomMetricEntries(metricId: number, fromDate: string, toDate: string): Promise<CustomMetricEntry[]>;
+  listSyntheses(opts?: { limit?: number }): Promise<AISynthesis[]>;
+  getSynthesisForWeek(weekStart: string): Promise<AISynthesis | null>;
 }

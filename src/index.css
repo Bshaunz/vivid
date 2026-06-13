@@ -1,12 +1,28 @@
 @import "tailwindcss";
 
-/* VIVID design tokens — Design Rules from CLAUDE.md, defined once. */
+/*
+ * VIVID design tokens — defined once.
+ *
+ * ACCENT HIERARCHY (permanent source of truth; the three roles never overlap):
+ *   1. AI only        → --color-ai      (#3266AD blue). Used ONLY by components
+ *                       surfacing an AI synthesis or prediction. Nothing else
+ *                       may be blue.
+ *   2. Positive delta → --color-positive (#2A933C green). Data only — an
+ *                       improvement vs the user's own norm. Never UI chrome.
+ *   3. Universal UI   → --color-accent = --color-neutral-600 (grey). Buttons,
+ *                       borders, active/selected states, focus rings.
+ *   --color-negative (#C02416) stays data-only for negative deltas + required
+ *   validation hints.
+ */
 @theme {
   --color-bg: #000000;
   --color-card: #141414;
   --color-card-border: #222222;
-  --color-accent: #2a933c; /* positive deltas + active states only */
-  --color-accent2: #2a6093; /* AI insight cards + AI highlights only */
+  --color-neutral-600: #525252; /* canonical grey */
+  --color-accent: var(--color-neutral-600); /* universal UI accent = grey */
+  --color-ai: #3266ad; /* AI synthesis / prediction surfaces ONLY */
+  --color-positive: #2a933c; /* positive deltas / data only */
+  --color-negative: #c02416; /* negative deltas + required hints / data only */
   --color-label: #666666;
 
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;

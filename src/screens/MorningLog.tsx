@@ -1,46 +1,45 @@
 import { useEffect, useState } from "react";
 import { useForm, type UseFormRegisterReturn } from "react-hook-form";
+import { useMutation } from "@tanstack/react-query";
 import { useApp } from "@/context/AppContext";
+import { useToast } from "@/components/Toast";
 import { NumberStepper } from "@/components/NumberStepper";
 import { addDays, todayISO } from "@/lib/dates";
+import * as api from "@/lib/apiClient";
 import type { DailyLog } from "@/types/domain";
 
 /**
  * Morning Log — Input State (~45 sec target).
  *
- * Frictionless rules enforced here:
+ * v4 fields only: morning_readiness + sleep_hours required; rhr/hrv optional.
+ * Bodyweight is NOT a daily_logs field — the quick-entry here writes a
+ * bodyweight_entries row (any day, any time; the week's median is what scores).
+ *
+ * Frictionless rules:
  * - Single viewport, no scroll: h-dvh flex column, submit pinned at bottom.
- * - Keypad-first: bodyweight autofocuses on mount with inputmode="decimal",
- *   so the numeric keypad is up before the user touches anything.
+ * - Keypad-first: bodyweight autofocuses with inputmode="decimal".
  * - All inputs uncontrolled (RHF register) — zero re-renders while typing.
- * - Steppers and segment control need no keyboard, so tapping past the
- *   bodyweight field dismisses the keypad naturally.
- * - Optional fields (rhr / hrv / caffeine_delay) collapsed by default;
- *   untouched means null in the data, never a fabricated false/zero.
+ * - Steppers/segments need no keyboard; tapping past bodyweight dismisses it.
+ * - Optional fields (rhr/hrv) collapsed; untouched means null, never a 0.
  */
 
 interface MorningFormValues {
-  bodyweight: string;
-  sleep_hours: string;
-  sleep_minutes: string;
+  bodyweight: string; // optional → bodyweight_entries
+  sleep_hours: string; // float, 0–16
   morning_readiness: string; // "1".."10"
   rhr: string;
   hrv: string;
-  caffeine_delay: "yes" | "no" | null;
 }
 
 interface Seed {
-  /** Most recent logged bodyweight — shown as placeholder, never prefilled. */
-  lastBodyweight: number | null;
-  /** Yesterday's sleep as stepper starting point, else 7h 30m. */
-  sleepHours: number;
-  sleepMinutes: number;
+  lastBodyweight: number | null; // placeholder only, never prefilled
+  sleepHours: number; // yesterday's sleep as stepper start, else 7.5
 }
 
 const READINESS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 
-function clampInt(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, Math.round(v)));
+function clampFloat(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
 }
 
 export default function MorningLog() {
@@ -53,14 +52,15 @@ export default function MorningLog() {
     let cancelled = false;
     (async () => {
       const today = todayISO();
-      const recent = await data.getDailyLogs(addDays(today, -14), addDays(today, -1));
-      const lastWeighed = [...recent].reverse().find((l) => l.bodyweight !== null);
+      const [recent, lastBw] = await Promise.all([
+        data.getDailyLogs(addDays(today, -7), addDays(today, -1)),
+        data.getLatestBodyweight(),
+      ]);
       const yesterday = recent.find((l) => l.date === addDays(today, -1));
       if (cancelled) return;
       setSeed({
-        lastBodyweight: lastWeighed?.bodyweight ?? null,
-        sleepHours: yesterday?.sleep_hours ?? 7,
-        sleepMinutes: yesterday?.sleep_minutes ?? 30,
+        lastBodyweight: lastBw?.value ?? null,
+        sleepHours: yesterday?.sleep_hours ?? 7.5,
       });
     })();
     return () => {
@@ -80,8 +80,19 @@ export default function MorningLog() {
 // ── Completed state ──────────────────────────────────────────────────────────
 
 function MorningComplete({ log, onEdit }: { log: DailyLog; onEdit: () => void }) {
-  const { profile } = useApp();
+  const { data, profile } = useApp();
   const unit = profile?.unit_pref ?? "lbs";
+  const [todayWeight, setTodayWeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    data.getBodyweightEntries(log.date, log.date).then((entries) => {
+      if (!cancelled) setTodayWeight(entries.at(-1)?.value ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [data, log.date]);
 
   return (
     <main className="mx-auto flex h-dvh max-w-[390px] flex-col px-5 pb-5 pt-6">
@@ -91,9 +102,9 @@ function MorningComplete({ log, onEdit }: { log: DailyLog; onEdit: () => void })
       </header>
 
       <section className="grid grid-cols-3 gap-3">
-        <SummaryCard label={`Weight (${unit})`} value={log.bodyweight ?? "--"} />
-        <SummaryCard label="Sleep" value={`${log.sleep_hours}h ${String(log.sleep_minutes).padStart(2, "0")}m`} />
         <SummaryCard label="Readiness" value={log.morning_readiness ?? "--"} />
+        <SummaryCard label="Sleep" value={log.sleep_hours != null ? `${log.sleep_hours}h` : "--"} />
+        <SummaryCard label={`Weight (${unit})`} value={todayWeight ?? "--"} />
       </section>
 
       <button
@@ -128,7 +139,12 @@ function MorningForm({
   onSaved: () => void;
 }) {
   const { data, profile, refresh } = useApp();
+  const { show } = useToast();
   const unit = profile?.unit_pref ?? "lbs";
+
+  // Optimistic: flips to the submitted view the instant the user taps Log,
+  // before the network settles. Reverted by onError.
+  const [submitted, setSubmitted] = useState(false);
 
   const fromExisting = existing?.morning_done ?? false;
   const {
@@ -136,40 +152,64 @@ function MorningForm({
     handleSubmit,
     setValue,
     getValues,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<MorningFormValues>({
     defaultValues: {
-      bodyweight: fromExisting && existing?.bodyweight != null ? String(existing.bodyweight) : "",
+      bodyweight: "",
       sleep_hours: String(fromExisting ? (existing?.sleep_hours ?? seed.sleepHours) : seed.sleepHours),
-      sleep_minutes: String(fromExisting ? (existing?.sleep_minutes ?? seed.sleepMinutes) : seed.sleepMinutes),
       morning_readiness:
         fromExisting && existing?.morning_readiness != null ? String(existing.morning_readiness) : "",
       rhr: fromExisting && existing?.rhr != null ? String(existing.rhr) : "",
       hrv: fromExisting && existing?.hrv != null ? String(existing.hrv) : "",
-      caffeine_delay:
-        fromExisting && existing?.caffeine_delay != null ? (existing.caffeine_delay ? "yes" : "no") : null,
     },
   });
 
-  const stepField = (name: "sleep_hours" | "sleep_minutes", delta: number, lo: number, hi: number) => {
-    const cur = Number(getValues(name));
+  const stepSleep = (delta: number) => {
+    const cur = parseFloat(getValues("sleep_hours"));
     const base = Number.isFinite(cur) ? cur : 0;
-    setValue(name, String(clampInt(base + delta, lo, hi)));
+    setValue("sleep_hours", String(clampFloat(Math.round((base + delta) * 4) / 4, 0, 16)));
   };
 
-  const onSubmit = handleSubmit(async (v) => {
-    await data.saveMorningLog(todayISO(), {
-      bodyweight: parseFloat(v.bodyweight),
-      sleep_hours: Number(v.sleep_hours),
-      sleep_minutes: Number(v.sleep_minutes),
-      morning_readiness: Number(v.morning_readiness),
-      rhr: v.rhr === "" ? null : Number(v.rhr),
-      hrv: v.hrv === "" ? null : Number(v.hrv),
-      caffeine_delay: v.caffeine_delay === null ? null : v.caffeine_delay === "yes",
-    });
-    await refresh();
-    onSaved();
+  const mutation = useMutation({
+    mutationFn: async (v: MorningFormValues) => {
+      const date = todayISO();
+      const readiness = Number(v.morning_readiness);
+      const sleep = parseFloat(v.sleep_hours);
+      const rhr = v.rhr === "" ? null : Number(v.rhr);
+      const hrv = v.hrv === "" ? null : Number(v.hrv);
+      const bwNum = parseFloat(v.bodyweight);
+      const bw = v.bodyweight.trim() !== "" && Number.isFinite(bwNum) ? bwNum : null;
+
+      // Real API call first (server validation + scoring). Throws on failure;
+      // returns null in local-only mode (no VITE_API_URL).
+      const res = await api.saveMorningLog({
+        date,
+        morning_readiness: readiness,
+        sleep_hours: sleep,
+        rhr,
+        hrv,
+        bodyweight: bw,
+      });
+
+      // Write-through to the local cache so context reads stay consistent.
+      await data.saveMorningLog(date, { morning_readiness: readiness, sleep_hours: sleep, rhr, hrv });
+      if (bw !== null) await data.addBodyweightEntry(bw);
+      return res;
+    },
+    onMutate: () => setSubmitted(true), // optimistic
+    onError: () => {
+      setSubmitted(false); // revert
+      show("Couldn't save your morning log — try again");
+    },
+    onSuccess: async () => {
+      await refresh();
+      onSaved();
+    },
   });
+
+  const onSubmit = handleSubmit((v) => mutation.mutate(v));
+
+  if (submitted) return <SubmittedCard title="Morning logged" pending={mutation.isPending} />;
 
   return (
     <main className="mx-auto flex h-dvh max-w-[390px] flex-col gap-5 overflow-hidden px-5 pb-5 pt-6">
@@ -179,50 +219,42 @@ function MorningForm({
       </header>
 
       <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col gap-5">
-        {/* 1 — Bodyweight: keypad-first */}
+        {/* 1 — Bodyweight quick-entry: keypad-first, optional (its own entity) */}
         <div className="flex flex-col gap-2">
-          <span className="label text-center">
-            Bodyweight ({unit}){errors.bodyweight && <span className="text-white"> — required</span>}
-          </span>
+          <span className="label text-center">Bodyweight ({unit}) · optional</span>
           <input
             type="text"
             inputMode="decimal"
             autoFocus
             placeholder={seed.lastBodyweight !== null ? String(seed.lastBodyweight) : "0.0"}
-            className="h-20 w-full rounded-[14px] border border-card-border bg-card text-center text-5xl font-extrabold outline-none placeholder:text-white/20 focus:border-white/40"
+            className="h-20 w-full rounded-[14px] border border-card-border bg-card text-center text-5xl font-extrabold outline-none placeholder:text-white/20 focus:border-accent"
             {...register("bodyweight", {
-              required: true,
-              validate: (v) => Number.isFinite(parseFloat(v)) && parseFloat(v) > 0,
+              validate: (v) => v.trim() === "" || (Number.isFinite(parseFloat(v)) && parseFloat(v) > 0),
             })}
           />
+          <p className="text-center text-[11px] leading-tight text-white/35">
+            Any day, any time — we use your weekly median, so more entries = a truer picture.
+          </p>
         </div>
 
-        {/* 2 — Total sleep: steppers, no native clock wheels */}
-        <div className="flex gap-3">
+        {/* 2 — Sleep hours: decimal stepper (float), ±0.25 = 15-min steps */}
+        <div className="flex">
           <NumberStepper
             label="Sleep hours"
+            inputMode="decimal"
             registration={register("sleep_hours", {
               required: true,
-              validate: (v) => Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) <= 24,
+              validate: (v) => Number.isFinite(parseFloat(v)) && parseFloat(v) >= 0 && parseFloat(v) <= 16,
             })}
-            onDecrement={() => stepField("sleep_hours", -1, 0, 24)}
-            onIncrement={() => stepField("sleep_hours", 1, 0, 24)}
-          />
-          <NumberStepper
-            label="Sleep minutes"
-            registration={register("sleep_minutes", {
-              required: true,
-              validate: (v) => Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) <= 59,
-            })}
-            onDecrement={() => stepField("sleep_minutes", -15, 0, 59)}
-            onIncrement={() => stepField("sleep_minutes", 15, 0, 59)}
+            onDecrement={() => stepSleep(-0.25)}
+            onIncrement={() => stepSleep(0.25)}
           />
         </div>
 
         {/* 3 — Morning readiness: 1–10 segment control */}
         <div className="flex flex-col gap-2">
           <span className="label text-center">
-            Readiness{errors.morning_readiness && <span className="text-white"> — required</span>}
+            Readiness{errors.morning_readiness && <span className="text-negative"> — required</span>}
           </span>
           <div className="grid grid-cols-10 gap-1">
             {READINESS.map((n) => (
@@ -245,37 +277,37 @@ function MorningForm({
         {/* Optional fields — collapsed, never block the fast path */}
         <details className="group">
           <summary className="label cursor-pointer list-none text-center group-open:mb-3">
-            RHR · HRV · Caffeine delay +
+            RHR · HRV +
           </summary>
           <div className="flex items-stretch gap-3">
             <OptionalNumberInput label="RHR" registration={register("rhr")} />
             <OptionalNumberInput label="HRV" registration={register("hrv")} />
-            <div className="flex flex-1 flex-col gap-2">
-              <span className="label text-center">Caffeine delay</span>
-              <div className="flex flex-1 gap-1">
-                {(["yes", "no"] as const).map((opt) => (
-                  <label
-                    key={opt}
-                    className="flex flex-1 cursor-pointer items-center justify-center rounded-[30px] border border-card-border bg-card text-xs font-semibold uppercase text-white/50 has-[:checked]:border-accent has-[:checked]:bg-accent has-[:checked]:text-white"
-                  >
-                    <input type="radio" value={opt} className="sr-only" {...register("caffeine_delay")} />
-                    {opt}
-                  </label>
-                ))}
-              </div>
-            </div>
           </div>
         </details>
 
         {/* 4 — Massive submit, pinned to the bottom of the viewport */}
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={mutation.isPending}
           className="mt-auto h-16 shrink-0 rounded-[14px] bg-white text-lg font-bold text-black active:bg-white/80 disabled:opacity-50"
         >
           Log morning
         </button>
       </form>
+    </main>
+  );
+}
+
+// Optimistic submitted view — shown the instant the user taps Log, while the
+// save settles in the background. Grey accent only (no blue/green chrome).
+export function SubmittedCard({ title, pending }: { title: string; pending: boolean }) {
+  return (
+    <main className="mx-auto flex h-dvh max-w-[390px] flex-col items-center justify-center gap-4 px-5">
+      <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-accent">
+        <span className="text-3xl font-bold text-white">✓</span>
+      </div>
+      <h1 className="text-2xl font-extrabold tracking-tight">{title}</h1>
+      <p className="label">{pending ? "Saving…" : "Saved"}</p>
     </main>
   );
 }
@@ -294,7 +326,7 @@ function OptionalNumberInput({
         type="text"
         inputMode="numeric"
         placeholder="--"
-        className="h-full w-full rounded-[8px] border border-card-border bg-card text-center text-xl font-bold outline-none placeholder:text-white/20 focus:border-white/40"
+        className="h-12 w-full rounded-[8px] border border-card-border bg-card text-center text-xl font-bold outline-none placeholder:text-white/20 focus:border-accent"
         {...registration}
       />
     </div>

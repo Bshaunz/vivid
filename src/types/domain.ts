@@ -1,31 +1,40 @@
 /**
- * VIVID domain types — 1:1 mirror of supabase/migrations/0001_init.sql.
+ * VIVID domain types — 1:1 mirror of supabase/migrations/0001_init.sql (v4.0).
  *
- * Field names are snake_case to match the database columns exactly, so the
- * localStorage → FastAPI/Supabase swap requires no mapping layer. Dates are
- * ISO strings: `YYYY-MM-DD` for date columns, full ISO 8601 for timestamps.
+ * Field names are snake_case to match the DB columns exactly, so the
+ * localStorage → FastAPI/Supabase swap needs no mapping layer. Dates are ISO
+ * strings: `YYYY-MM-DD` for date columns, full ISO 8601 for timestamps.
+ *
+ * v4 contract (do not drift):
+ *  - Bodyweight is NOT on daily_logs. It lives in bodyweight_entries (many per
+ *    day) and is consumed only as a weekly median (WeeklyBodyweight).
+ *  - daily_logs has training_done(bool), not a 3-state status. Rest days are a
+ *    scoring concern derived from habit frequency_days, never logged here.
+ *  - No screen_time, no caffeine_delay, no custom metrics — cut in §4.
+ *  - Goals are display-only: they feed no score (§6.7).
  */
 
 export type Pillar = "Health" | "Fitness" | "Finances";
-/** completed = 1.0, rest = 0.5, missed = 0.0 in the Fitness score. */
-export type TrainingStatus = "completed" | "missed" | "rest";
 export type FrequencyType = "daily" | "weekly" | "monthly";
 export type GoalType = "metric" | "habit";
-export type MetricDirection = "above" | "below";
-export type SynthesisType = "weekly" | "daily" | "ondemand";
-export type CustomMetricType = "number" | "scale" | "boolean";
-export type UpdateFrequency = "daily" | "weekly";
+export type GoalDirection = "above" | "below";
+/** MVP ships weekly only; post-launch types are added by migration. */
+export type SynthesisType = "weekly";
 export type CurrencyCode = "CAD" | "USD";
 export type UnitPreference = "lbs" | "kg";
 
-/** 0 = Sunday … 6 = Saturday */
-export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+/** ISO weekday: 1 = Monday … 7 = Sunday (matches Postgres isodow). */
+export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-export interface NotificationPrefs {
-  morning_time?: string; // "07:00"
-  evening_time?: string; // "21:00"
-  weekly_time?: string; // "18:00" (Sunday)
-}
+/** Metrics eligible for the baseline/deviation layer (§6.8). */
+export type BaselineMetricKey =
+  | "morning_readiness"
+  | "sleep_hours"
+  | "rhr"
+  | "hrv"
+  | "deep_work_hours"
+  | "discretionary_spend"
+  | "weekly_median_bodyweight";
 
 export interface UserProfile {
   id: string;
@@ -35,8 +44,9 @@ export interface UserProfile {
   unit_pref: UnitPreference;
   active_pillars: Pillar[];
   daily_budget: number | null;
-  notification_prefs: NotificationPrefs;
-  consent_accepted_at: string;
+  /** Profile setting in v4, not a weekly-log field. Drives bw_trend (§6.3). */
+  bodyweight_goal: number | null;
+  consent_timestamp: string;
   created_at: string;
 }
 
@@ -45,52 +55,58 @@ export interface DailyLog {
   user_id: string;
   date: string;
 
-  // Morning Log — Input State
-  bodyweight: number | null;
-  sleep_hours: number | null;
-  sleep_minutes: number | null;
-  morning_readiness: number | null;
+  // Morning (AM)
+  morning_readiness: number | null; // 1–10
+  sleep_hours: number | null; // float, 0–16
   rhr: number | null;
   hrv: number | null;
-  caffeine_delay: boolean | null;
   morning_done: boolean;
 
-  // Evening Log — Output State
+  // Evening (PM)
+  training_done: boolean | null;
+  workout_rpe: number | null; // 1–10
   deep_work_hours: number | null;
-  training_status: TrainingStatus | null;
   macro_adherence: boolean | null;
   caloric_variance_pct: number | null;
   discretionary_spend: number | null;
   daily_reflection: string | null;
-  workout_rpe: number | null;
-  screen_time_hours: number | null;
   evening_done: boolean;
-
-  /** Derived: sleep_hours * 60 + sleep_minutes (generated column in Postgres) */
-  sleep_total_minutes: number | null;
 }
 
 /** Required morning fields are non-optional — the type enforces completeness. */
 export interface MorningLogInput {
-  bodyweight: number;
-  sleep_hours: number;
-  sleep_minutes: number;
   morning_readiness: number;
+  sleep_hours: number;
   rhr?: number | null;
   hrv?: number | null;
-  caffeine_delay?: boolean | null;
 }
 
 /** Required evening fields are non-optional — the type enforces completeness. */
 export interface EveningLogInput {
+  training_done: boolean;
   deep_work_hours: number;
-  training_status: TrainingStatus;
-  macro_adherence: boolean;
   discretionary_spend: number;
+  macro_adherence?: boolean | null;
   caloric_variance_pct?: number | null;
-  daily_reflection?: string | null;
   workout_rpe?: number | null;
-  screen_time_hours?: number | null;
+  daily_reflection?: string | null;
+}
+
+/** Raw bodyweight sample. Many per day allowed; never scored or charted raw. */
+export interface BodyweightEntry {
+  id: number;
+  user_id: string;
+  logged_at: string; // ISO 8601 timestamp
+  value: number;
+}
+
+/** Derived (v_weekly_bodyweight) — the ONLY bodyweight series anything scores
+ *  or charts. low_confidence flags weeks with 1–2 samples (§4 bodyweight rule). */
+export interface WeeklyBodyweight {
+  week_start: string;
+  weekly_median_bodyweight: number;
+  n_samples: number;
+  low_confidence: boolean;
 }
 
 export interface Habit {
@@ -98,7 +114,7 @@ export interface Habit {
   user_id: string;
   name: string;
   description: string | null;
-  /** null = unassigned → contributes directly to Day Score */
+  /** null = unassigned → contributes to Day Score u_weight block (§6.7). */
   pillar: Pillar | null;
   frequency_type: FrequencyType;
   frequency_count: number;
@@ -121,46 +137,42 @@ export interface HabitCompletion {
 export interface WeeklyLog {
   id: number;
   user_id: string;
-  /** ISO Monday of the week under review */
+  /** ISO Monday of the week under review. */
   week_start: string;
-  avg_bodyweight_7d: number | null;
-  bodyweight_goal: number | null;
-  total_training_sessions: number | null;
-  capital_allocated: number | null;
+  capital_allocated: number;
   bottleneck_audit: string | null;
-  posts_published: number | null;
-  followers: number | null;
-  waitlist_signups: number | null;
 }
 
 export type WeeklyLogInput = Omit<WeeklyLog, "id" | "user_id">;
 
-/** Mirror of v_weekly_rollup — prefills the Sunday review. */
-export interface WeeklyRollup {
+/** Read-only anchors prefilling the Sunday review, computed from the week's
+ *  own logs and bodyweight entries — never persisted into weekly_logs. */
+export interface WeeklySummary {
   week_start: string;
-  avg_bodyweight_7d: number | null;
-  total_training_sessions: number;
-  morning_logs_completed: number;
-  evening_logs_completed: number;
+  /** Weekly median from bodyweight_entries (§4), null when no samples. */
+  median_bodyweight: number | null;
+  n_bw_samples: number;
+  low_confidence: boolean;
+  training_sessions: number; // count of training_done = true
+  evenings_logged: number;
 }
 
+/** DISPLAY-ONLY in MVP (§6.7): progress is rendered, never scored. */
 export interface Goal {
   id: number;
   user_id: string;
   name: string;
   type: GoalType;
 
+  // metric goals
   metric_key: string | null;
-  metric_target_value: number | null;
-  metric_current_value: number | null;
-  metric_direction: MetricDirection | null;
+  target_value: number | null;
+  direction: GoalDirection | null;
 
+  // habit goals
   habit_id: number | null;
-  habit_target_days: number | null;
-  habit_completed_days: number | null;
-  habit_target_rate: number | null;
 
-  /** null = tracked and displayed, not scored */
+  /** Display badge only. */
   pillar: Pillar | null;
   target_date: string;
   is_active: boolean;
@@ -170,30 +182,24 @@ export interface Goal {
 
 export type GoalInput = Omit<Goal, "id" | "user_id" | "created_at">;
 
+export interface Baseline {
+  id: number;
+  user_id: string;
+  metric_key: BaselineMetricKey;
+  window_days: number;
+  mean: number;
+  sd: number;
+  n_observations: number;
+  computed_at: string;
+}
+
 export interface AISynthesis {
   id: number;
   user_id: string;
   generated_at: string;
   type: SynthesisType;
   content: string;
-}
-
-export interface CustomMetric {
-  id: number;
-  user_id: string;
-  name: string;
-  unit: string | null;
-  type: CustomMetricType;
-  update_frequency: UpdateFrequency;
-  created_at: string;
-}
-
-export type CustomMetricInput = Omit<CustomMetric, "id" | "user_id" | "created_at">;
-
-export interface CustomMetricEntry {
-  id: number;
-  user_id: string;
-  metric_id: number;
-  date: string;
-  value: number;
+  tokens_in: number;
+  tokens_out: number;
+  model: string;
 }

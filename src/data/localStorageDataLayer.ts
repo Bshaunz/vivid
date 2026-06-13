@@ -1,9 +1,7 @@
 import type { DataLayer } from "./DataLayer";
 import type {
   AISynthesis,
-  CustomMetric,
-  CustomMetricEntry,
-  CustomMetricInput,
+  BodyweightEntry,
   DailyLog,
   EveningLogInput,
   Goal,
@@ -12,22 +10,25 @@ import type {
   HabitCompletion,
   HabitInput,
   MorningLogInput,
-  SynthesisType,
   UserProfile,
+  WeeklyBodyweight,
   WeeklyLog,
   WeeklyLogInput,
-  WeeklyRollup,
+  WeeklySummary,
 } from "../types/domain";
-import { todayISO } from "../lib/dates";
+import { addDays } from "../lib/dates";
 
 /**
  * localStorage-backed DataLayer (MVP).
  *
- * Mirrors the Postgres schema's integrity rules in code: unique (user, date)
- * per daily log, unique (habit, date) per completion, required-field checks
+ * Mirrors the v4 Postgres schema's integrity rules in code: unique (user,date)
+ * per daily log, unique (user,habit,date) per completion, required-field checks
  * before a log half is marked done, and range checks identical to the SQL
- * check constraints. Data written here is shaped exactly like the API
- * payloads the FastAPI backend will accept, so migration is an export/import.
+ * check constraints. Data written here is shaped exactly like the API payloads
+ * the FastAPI backend will accept, so migration is an export/import.
+ *
+ * Bodyweight is a separate collection (many per day) and is exposed to the rest
+ * of the app only as a weekly median — raw values are never scored (§4).
  */
 
 const NS = "vivid:v1";
@@ -36,13 +37,12 @@ const LOCAL_USER_ID = "local-user";
 type CollectionKey =
   | "profile"
   | "daily_logs"
+  | "bodyweight_entries"
   | "habits"
   | "habit_completions"
   | "weekly_logs"
   | "goals"
   | "ai_syntheses"
-  | "custom_metrics"
-  | "custom_metric_entries"
   | "seq";
 
 function key(k: CollectionKey): string {
@@ -77,29 +77,31 @@ function inRange(v: number, lo: number, hi: number): boolean {
   return Number.isFinite(v) && v >= lo && v <= hi;
 }
 
+/** Median of a numeric list. Caller guarantees non-empty. */
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
 function emptyDailyLog(date: string): DailyLog {
   return {
     id: nextId(),
     user_id: LOCAL_USER_ID,
     date,
-    bodyweight: null,
-    sleep_hours: null,
-    sleep_minutes: null,
     morning_readiness: null,
+    sleep_hours: null,
     rhr: null,
     hrv: null,
-    caffeine_delay: null,
     morning_done: false,
+    training_done: null,
+    workout_rpe: null,
     deep_work_hours: null,
-    training_status: null,
     macro_adherence: null,
     caloric_variance_pct: null,
     discretionary_spend: null,
     daily_reflection: null,
-    workout_rpe: null,
-    screen_time_hours: null,
     evening_done: false,
-    sleep_total_minutes: null,
   };
 }
 
@@ -135,13 +137,12 @@ export class LocalStorageDataLayer implements DataLayer {
     const keys: CollectionKey[] = [
       "profile",
       "daily_logs",
+      "bodyweight_entries",
       "habits",
       "habit_completions",
       "weekly_logs",
       "goals",
       "ai_syntheses",
-      "custom_metrics",
-      "custom_metric_entries",
       "seq",
     ];
     for (const k of keys) localStorage.removeItem(key(k));
@@ -169,57 +170,86 @@ export class LocalStorageDataLayer implements DataLayer {
       logs.push(log);
     }
     mutate(log);
-    // mirror the generated column
-    log.sleep_total_minutes =
-      log.sleep_hours !== null && log.sleep_minutes !== null
-        ? log.sleep_hours * 60 + log.sleep_minutes
-        : null;
     write("daily_logs", logs);
     return log;
   }
 
   async saveMorningLog(date: string, input: MorningLogInput): Promise<DailyLog> {
-    assert(input.bodyweight > 0, "bodyweight must be > 0");
-    assert(inRange(input.sleep_hours, 0, 24), "sleep_hours must be 0–24");
-    assert(inRange(input.sleep_minutes, 0, 59), "sleep_minutes must be 0–59");
     assert(inRange(input.morning_readiness, 1, 10), "morning_readiness must be 1–10");
+    assert(inRange(input.sleep_hours, 0, 16), "sleep_hours must be 0–16");
     if (input.rhr != null) assert(inRange(input.rhr, 20, 250), "rhr out of range");
     if (input.hrv != null) assert(inRange(input.hrv, 0, 300), "hrv out of range");
 
     return this.upsertDailyLog(date, (log) => {
-      log.bodyweight = input.bodyweight;
-      log.sleep_hours = input.sleep_hours;
-      log.sleep_minutes = input.sleep_minutes;
       log.morning_readiness = input.morning_readiness;
+      log.sleep_hours = input.sleep_hours;
       log.rhr = input.rhr ?? null;
       log.hrv = input.hrv ?? null;
-      log.caffeine_delay = input.caffeine_delay ?? null;
       log.morning_done = true;
     });
   }
 
   async saveEveningLog(date: string, input: EveningLogInput): Promise<DailyLog> {
+    assert(typeof input.training_done === "boolean", "training_done is required");
     assert(inRange(input.deep_work_hours, 0, 24), "deep_work_hours must be 0–24");
-    assert(
-      input.training_status === "completed" || input.training_status === "missed" || input.training_status === "rest",
-      "training_status must be completed | missed | rest",
-    );
     assert(input.discretionary_spend >= 0, "discretionary_spend must be >= 0");
     if (input.workout_rpe != null) assert(inRange(input.workout_rpe, 1, 10), "workout_rpe must be 1–10");
-    if (input.screen_time_hours != null)
-      assert(inRange(input.screen_time_hours, 0, 24), "screen_time_hours must be 0–24");
 
     return this.upsertDailyLog(date, (log) => {
+      log.training_done = input.training_done;
       log.deep_work_hours = input.deep_work_hours;
-      log.training_status = input.training_status;
-      log.macro_adherence = input.macro_adherence;
-      log.caloric_variance_pct = input.caloric_variance_pct ?? null;
       log.discretionary_spend = input.discretionary_spend;
-      log.daily_reflection = input.daily_reflection ?? null;
+      log.macro_adherence = input.macro_adherence ?? null;
+      log.caloric_variance_pct = input.caloric_variance_pct ?? null;
       log.workout_rpe = input.workout_rpe ?? null;
-      log.screen_time_hours = input.screen_time_hours ?? null;
+      log.daily_reflection = input.daily_reflection ?? null;
       log.evening_done = true;
     });
+  }
+
+  // ── Bodyweight ─────────────────────────────────────────────────────────────
+
+  async addBodyweightEntry(value: number, loggedAt?: string): Promise<BodyweightEntry> {
+    assert(inRange(value, 30, 660), "bodyweight must be 30–660");
+    const entries = read<BodyweightEntry[]>("bodyweight_entries", []);
+    const entry: BodyweightEntry = {
+      id: nextId(),
+      user_id: LOCAL_USER_ID,
+      logged_at: loggedAt ?? new Date().toISOString(),
+      value,
+    };
+    entries.push(entry);
+    write("bodyweight_entries", entries);
+    return entry;
+  }
+
+  async getBodyweightEntries(fromDate: string, toDate: string): Promise<BodyweightEntry[]> {
+    // toDate is inclusive by calendar day, so compare against its end-of-day.
+    const toExclusive = addDays(toDate, 1);
+    return read<BodyweightEntry[]>("bodyweight_entries", [])
+      .filter((e) => {
+        const day = e.logged_at.slice(0, 10);
+        return day >= fromDate && day < toExclusive;
+      })
+      .sort((a, b) => a.logged_at.localeCompare(b.logged_at));
+  }
+
+  async getLatestBodyweight(): Promise<BodyweightEntry | null> {
+    const entries = read<BodyweightEntry[]>("bodyweight_entries", []);
+    if (entries.length === 0) return null;
+    return entries.reduce((latest, e) => (e.logged_at > latest.logged_at ? e : latest));
+  }
+
+  async getWeeklyBodyweight(weekStart: string): Promise<WeeklyBodyweight | null> {
+    const weekEnd = addDays(weekStart, 6);
+    const samples = (await this.getBodyweightEntries(weekStart, weekEnd)).map((e) => e.value);
+    if (samples.length === 0) return null;
+    return {
+      week_start: weekStart,
+      weekly_median_bodyweight: Math.round(median(samples) * 100) / 100,
+      n_samples: samples.length,
+      low_confidence: samples.length < 3,
+    };
   }
 
   // ── Habits ───────────────────────────────────────────────────────────────
@@ -231,6 +261,7 @@ export class LocalStorageDataLayer implements DataLayer {
 
   async createHabit(input: HabitInput): Promise<Habit> {
     assert(input.name.trim().length > 0, "habit name required");
+    assert(input.name.length <= 80, "habit name must be <= 80 chars");
     assert(input.frequency_count >= 1, "frequency_count must be >= 1");
     const habits = read<Habit[]>("habits", []);
     const habit: Habit = {
@@ -297,6 +328,7 @@ export class LocalStorageDataLayer implements DataLayer {
   }
 
   async saveWeeklyLog(input: WeeklyLogInput): Promise<WeeklyLog> {
+    assert(input.capital_allocated >= 0, "capital_allocated must be >= 0");
     const logs = read<WeeklyLog[]>("weekly_logs", []);
     const idx = logs.findIndex((l) => l.week_start === input.week_start);
     if (idx !== -1) {
@@ -310,28 +342,21 @@ export class LocalStorageDataLayer implements DataLayer {
     return log;
   }
 
-  async getWeeklyRollup(weekStart: string): Promise<WeeklyRollup> {
-    const weekEnd = ((d) => {
-      const [y, m, day] = d.split("-").map(Number);
-      const dt = new Date(y, m - 1, day + 6);
-      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
-    })(weekStart);
-
+  async getWeeklySummary(weekStart: string): Promise<WeeklySummary> {
+    const weekEnd = addDays(weekStart, 6);
     const logs = await this.getDailyLogs(weekStart, weekEnd);
-    const weights = logs.map((l) => l.bodyweight).filter((b): b is number => b !== null);
+    const bw = await this.getWeeklyBodyweight(weekStart);
     return {
       week_start: weekStart,
-      avg_bodyweight_7d:
-        weights.length > 0
-          ? Math.round((weights.reduce((s, w) => s + w, 0) / weights.length) * 100) / 100
-          : null,
-      total_training_sessions: logs.filter((l) => l.training_status === "completed").length,
-      morning_logs_completed: logs.filter((l) => l.morning_done).length,
-      evening_logs_completed: logs.filter((l) => l.evening_done).length,
+      median_bodyweight: bw?.weekly_median_bodyweight ?? null,
+      n_bw_samples: bw?.n_samples ?? 0,
+      low_confidence: bw?.low_confidence ?? false,
+      training_sessions: logs.filter((l) => l.training_done === true).length,
+      evenings_logged: logs.filter((l) => l.evening_done).length,
     };
   }
 
-  // ── Goals ────────────────────────────────────────────────────────────────
+  // ── Goals (display-only) ───────────────────────────────────────────────────
 
   async listGoals(opts?: { activeOnly?: boolean }): Promise<Goal[]> {
     const goals = read<Goal[]>("goals", []);
@@ -342,14 +367,11 @@ export class LocalStorageDataLayer implements DataLayer {
     // mirror of the goal_shape check constraint
     if (input.type === "metric") {
       assert(
-        input.metric_key !== null && input.metric_target_value !== null && input.metric_direction !== null,
-        "metric goal requires metric_key, metric_target_value, metric_direction",
+        input.metric_key !== null && input.target_value !== null && input.direction !== null,
+        "metric goal requires metric_key, target_value, direction",
       );
     } else {
-      assert(
-        input.habit_id !== null && (input.habit_target_days !== null || input.habit_target_rate !== null),
-        "habit goal requires habit_id and a target (days or rate)",
-      );
+      assert(input.habit_id !== null, "habit goal requires habit_id");
     }
     const goals = read<Goal[]>("goals", []);
     const goal: Goal = {
@@ -379,82 +401,22 @@ export class LocalStorageDataLayer implements DataLayer {
 
   // ── AI syntheses ─────────────────────────────────────────────────────────
 
-  async listSyntheses(opts?: { type?: SynthesisType; limit?: number }): Promise<AISynthesis[]> {
-    let rows = read<AISynthesis[]>("ai_syntheses", []).sort((a, b) =>
+  async listSyntheses(opts?: { limit?: number }): Promise<AISynthesis[]> {
+    const rows = read<AISynthesis[]>("ai_syntheses", []).sort((a, b) =>
       b.generated_at.localeCompare(a.generated_at),
     );
-    if (opts?.type) rows = rows.filter((r) => r.type === opts.type);
     return opts?.limit !== undefined ? rows.slice(0, opts.limit) : rows;
   }
 
-  async addSynthesis(type: SynthesisType, content: string): Promise<AISynthesis> {
-    const rows = read<AISynthesis[]>("ai_syntheses", []);
-    const row: AISynthesis = {
-      id: nextId(),
-      user_id: LOCAL_USER_ID,
-      generated_at: new Date().toISOString(),
-      type,
-      content,
-    };
-    rows.push(row);
-    write("ai_syntheses", rows);
-    return row;
-  }
-
-  async countOnDemandToday(): Promise<number> {
-    const today = todayISO();
-    return read<AISynthesis[]>("ai_syntheses", []).filter(
-      (r) => r.type === "ondemand" && r.generated_at.slice(0, 10) === today,
-    ).length;
-  }
-
-  // ── Custom metrics ───────────────────────────────────────────────────────
-
-  async listCustomMetrics(): Promise<CustomMetric[]> {
-    return read<CustomMetric[]>("custom_metrics", []);
-  }
-
-  async createCustomMetric(input: CustomMetricInput): Promise<CustomMetric> {
-    assert(input.name.trim().length > 0, "custom metric name required");
-    const metrics = read<CustomMetric[]>("custom_metrics", []);
-    const metric: CustomMetric = {
-      ...input,
-      id: nextId(),
-      user_id: LOCAL_USER_ID,
-      created_at: new Date().toISOString(),
-    };
-    metrics.push(metric);
-    write("custom_metrics", metrics);
-    return metric;
-  }
-
-  async deleteCustomMetric(id: number): Promise<void> {
-    write("custom_metrics", read<CustomMetric[]>("custom_metrics", []).filter((m) => m.id !== id));
-    write(
-      "custom_metric_entries",
-      read<CustomMetricEntry[]>("custom_metric_entries", []).filter((e) => e.metric_id !== id),
+  async getSynthesisForWeek(weekStart: string): Promise<AISynthesis | null> {
+    const weekEnd = addDays(weekStart, 7); // exclusive upper bound
+    return (
+      read<AISynthesis[]>("ai_syntheses", [])
+        .filter((r) => {
+          const day = r.generated_at.slice(0, 10);
+          return day >= weekStart && day < weekEnd;
+        })
+        .sort((a, b) => b.generated_at.localeCompare(a.generated_at))[0] ?? null
     );
-  }
-
-  async setCustomMetricEntry(metricId: number, date: string, value: number): Promise<CustomMetricEntry> {
-    const metrics = read<CustomMetric[]>("custom_metrics", []);
-    assert(metrics.some((m) => m.id === metricId), `setCustomMetricEntry: metric ${metricId} not found`);
-
-    const entries = read<CustomMetricEntry[]>("custom_metric_entries", []);
-    let entry = entries.find((e) => e.metric_id === metricId && e.date === date);
-    if (entry) {
-      entry.value = value;
-    } else {
-      entry = { id: nextId(), user_id: LOCAL_USER_ID, metric_id: metricId, date, value };
-      entries.push(entry);
-    }
-    write("custom_metric_entries", entries);
-    return entry;
-  }
-
-  async getCustomMetricEntries(metricId: number, fromDate: string, toDate: string): Promise<CustomMetricEntry[]> {
-    return read<CustomMetricEntry[]>("custom_metric_entries", [])
-      .filter((e) => e.metric_id === metricId && e.date >= fromDate && e.date <= toDate)
-      .sort((a, b) => a.date.localeCompare(b.date));
   }
 }
