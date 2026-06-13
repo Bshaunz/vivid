@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     max_monthly_tokens: int = 2_000_000
     daily_token_budget_per_user: int = 60_000
 
+    @property
+    def cors_origins(self) -> list[str]:
+        """Production allow-list. Supports a comma-separated FRONTEND_ORIGIN so
+        the Vercel app + any preview domains can be listed explicitly — never a
+        wildcard in prod (§3.1)."""
+        return [o.strip() for o in self.frontend_origin.split(",") if o.strip()]
+
 
 @lru_cache
 def get_settings() -> Settings:

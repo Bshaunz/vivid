@@ -1,0 +1,7 @@
+INFO:     127.0.0.1:62363 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62369 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62375 - "GET /api/dashboard?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62381 - "OPTIONS /api/logs/morning HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62387 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62393 - "GET /api/dashboard?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62399 - "OPTIONS /api/logs/morning HTTP/1.1" 200 OK

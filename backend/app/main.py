@@ -20,14 +20,26 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # override with a stricter 10/min at their own routes.
 app.add_middleware(SlowAPIMiddleware)
 
-# Exact origin only — never a wildcard (§3.1)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+# CORS (§3.1). The previous single hardcoded origin blocked the browser whenever
+# the dev origin varied (127.0.0.1 vs localhost, a non-5173 Vite port), which
+# surfaced as the "Couldn't reach your data" network error. Fix:
+#   - dev: accept any localhost / 127.0.0.1 port via regex.
+#   - prod: the exact configured origin(s) only — never a wildcard.
+# allow_methods/allow_headers "*" covers the OPTIONS preflight that POST/PUT/
+# DELETE (Content-Type: application/json) requests trigger.
+_cors = dict(
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+if settings.dev_mode:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+        **_cors,
+    )
+else:
+    app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, **_cors)
 
 
 @app.get("/healthz")
