@@ -336,10 +336,23 @@ class DailyAnalysisOut(BaseModel):
     habit_completion_ratio: float | None
 
 
+class DayScorePoint(BaseModel):
+    """Computed Day + Pillar scores for one logged day — the historical series
+    behind the Day Score hero (delta, personal best) and the pillar sparklines.
+    Only days with a log appear, so gaps in the chart are honest gaps."""
+
+    date: dt_date
+    day_score: int
+    health: float | None
+    fitness: float | None
+    finance: float | None
+
+
 class DashboardOut(BaseModel):
     from_date: dt_date
     to_date: dt_date
     days: list[DailyAnalysisOut]
     today_scores: ScoresOut
+    score_series: list[DayScorePoint]
     latest_bodyweight: float | None
     weekly_bodyweight: list[WeeklyBodyweightOut]

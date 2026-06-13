@@ -1,54 +1,56 @@
-import { useState } from "react";
-import MorningLog from "@/screens/MorningLog";
-import EveningLog from "@/screens/EveningLog";
-import WeeklyLog from "@/screens/WeeklyLog";
-
-type Tab = "morning" | "evening" | "weekly";
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "morning", label: "AM" },
-  { id: "evening", label: "PM" },
-  { id: "weekly", label: "WK" },
-];
-
-function initialTab(): Tab {
-  const param = new URLSearchParams(window.location.search).get("tab");
-  if (param === "morning" || param === "evening" || param === "weekly") return param;
-  if (new Date().getDay() === 0) return "weekly";
-  return new Date().getHours() >= 15 ? "evening" : "morning";
-}
+import { lazy, Suspense } from "react";
+import { Routes, Route } from "react-router-dom";
+import { BottomNav } from "@/components/BottomNav";
+import { SkeletonBlock } from "@/components/Skeleton";
 
 /**
- * Temporary shell: tab switcher until the router + bottom nav land.
- * ?tab=morning|evening|weekly jumps straight to a screen for testing.
+ * App shell. A fixed-height flex column: a scrollable content area owns the
+ * viewport, the bottom nav sits beneath it. Screens fill the content area with
+ * h-full — the log forms keep their single-viewport, pinned-submit behaviour
+ * while Home/Pillars scroll within it.
+ *
+ * Routes are lazy so the heavy chart code (recharts, Home/Pillars) splits into
+ * its own chunk and never weighs down the fast log-entry path.
  */
-export default function App() {
-  const [tab, setTab] = useState<Tab>(initialTab);
+const Home = lazy(() => import("@/screens/Home"));
+const Pillars = lazy(() => import("@/screens/Pillars"));
+const Log = lazy(() => import("@/screens/Log"));
+const Placeholder = lazy(() => import("@/screens/Placeholder"));
 
+function RouteFallback() {
   return (
-    <div>
-      {/* fixed (not absolute): survives the keyboard-driven scroll when the
-          bodyweight field autofocuses, and clears the notch via safe-area */}
-      <div
-        className="fixed right-4 z-50 flex gap-1"
-        style={{ top: "calc(env(safe-area-inset-top) + 12px)" }}
-      >
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`h-9 rounded-[30px] border px-3 text-xs font-semibold uppercase tracking-wide ${
-              tab === t.id
-                ? "border-accent bg-accent text-white"
-                : "border-card-border bg-card text-white/50"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      {tab === "morning" ? <MorningLog /> : tab === "evening" ? <EveningLog /> : <WeeklyLog />}
+    <div className="mx-auto flex max-w-[390px] flex-col gap-4 px-5 pt-6">
+      <SkeletonBlock className="h-10 w-32" />
+      <SkeletonBlock className="h-40 w-full" />
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <div className="flex h-dvh flex-col">
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/pillars" element={<Pillars />} />
+            <Route path="/log" element={<Log />} />
+            <Route
+              path="/goals"
+              element={<Placeholder title="Goals" note="Goal tracking arrives in build step 13. Goals are display-only — they never affect your scores." />}
+            />
+            <Route
+              path="/ai"
+              element={<Placeholder title="AI Synthesis" note="Your weekly synthesis lands here once step 10 ships — a plain-language read of what changed across Health, Fitness and Finance." />}
+            />
+            <Route
+              path="/settings"
+              element={<Placeholder title="Settings" note="Pillars, habits, budget, bodyweight goal, units, export and account deletion arrive in build step 14." />}
+            />
+          </Routes>
+        </Suspense>
+      </main>
+      <BottomNav />
     </div>
   );
 }

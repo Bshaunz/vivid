@@ -17,7 +17,7 @@ import type { DailyLog } from "@/types/domain";
  * bodyweight_entries row (any day, any time; the week's median is what scores).
  *
  * Frictionless rules:
- * - Single viewport, no scroll: h-dvh flex column, submit pinned at bottom.
+ * - Single viewport, no scroll: h-full flex column, submit pinned at bottom.
  * - Keypad-first: bodyweight autofocuses with inputmode="decimal".
  * - All inputs uncontrolled (RHF register) — zero re-renders while typing.
  * - Steppers/segments need no keyboard; tapping past bodyweight dismisses it.
@@ -96,7 +96,7 @@ function MorningComplete({ log, onEdit }: { log: DailyLog; onEdit: () => void })
   }, [data, log.date]);
 
   return (
-    <main className="mx-auto flex h-dvh max-w-[390px] flex-col px-5 pb-5 pt-6">
+    <main className="mx-auto flex h-full max-w-[390px] flex-col px-5 pb-5 pt-6">
       <header className="mb-6">
         <p className="label">{log.date}</p>
         <h1 className="text-2xl font-extrabold tracking-tight">Morning logged</h1>
@@ -202,7 +202,7 @@ function MorningForm({
   if (submitted) return <SubmittedCard title="Morning logged" pending={mutation.isPending} />;
 
   return (
-    <main className="mx-auto flex h-dvh max-w-[390px] flex-col gap-5 overflow-hidden px-5 pb-5 pt-6">
+    <main className="mx-auto flex h-full max-w-[390px] flex-col gap-5 overflow-hidden px-5 pb-5 pt-6">
       <header>
         <p className="label">{todayISO()}</p>
         <h1 className="text-2xl font-extrabold tracking-tight">Morning</h1>
@@ -292,7 +292,7 @@ function MorningForm({
 // save settles in the background. Grey accent only (no blue/green chrome).
 export function SubmittedCard({ title, pending }: { title: string; pending: boolean }) {
   return (
-    <main className="mx-auto flex h-dvh max-w-[390px] flex-col items-center justify-center gap-4 px-5">
+    <main className="mx-auto flex h-full max-w-[390px] flex-col items-center justify-center gap-4 px-5">
       <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-accent">
         <span className="text-3xl font-bold text-white">✓</span>
       </div>

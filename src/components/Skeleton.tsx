@@ -10,7 +10,7 @@ export function SkeletonBlock({ className = "" }: { className?: string }) {
 /** Full-screen log skeleton matching the 390px single-viewport log layout. */
 export function LogSkeleton({ title }: { title: string }) {
   return (
-    <main className="mx-auto flex h-dvh max-w-[390px] flex-col gap-5 px-5 pb-5 pt-6">
+    <main className="mx-auto flex h-full max-w-[390px] flex-col gap-5 px-5 pb-5 pt-6">
       <header>
         <SkeletonBlock className="h-3 w-24" />
         <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-white/80">{title}</h1>

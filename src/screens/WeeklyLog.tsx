@@ -72,7 +72,7 @@ export default function WeeklyLog() {
 function WeeklyLocked({ today }: { today: string }) {
   const daysUntilSunday = (7 - parseISODate(today).getDay()) % 7;
   return (
-    <main className="mx-auto flex h-dvh max-w-[390px] flex-col px-5 pb-5 pt-6">
+    <main className="mx-auto flex h-full max-w-[390px] flex-col px-5 pb-5 pt-6">
       <header>
         <p className="label">{today}</p>
         <h1 className="text-2xl font-extrabold tracking-tight">Weekly review</h1>
@@ -135,7 +135,7 @@ function WeeklyComplete({
   const unit = profile?.unit_pref ?? "lbs";
 
   return (
-    <main className="mx-auto flex h-dvh max-w-[390px] flex-col gap-4 px-5 pb-5 pt-6">
+    <main className="mx-auto flex h-full max-w-[390px] flex-col gap-4 px-5 pb-5 pt-6">
       <header>
         <p className="label">Week of {log.week_start}</p>
         <h1 className="text-2xl font-extrabold tracking-tight">Week reviewed</h1>
@@ -204,7 +204,7 @@ function WeeklyForm({
   });
 
   return (
-    <main className="mx-auto flex h-dvh max-w-[390px] flex-col gap-4 overflow-hidden px-5 pb-5 pt-6">
+    <main className="mx-auto flex h-full max-w-[390px] flex-col gap-4 overflow-hidden px-5 pb-5 pt-6">
       <header>
         <p className="label">Week of {weekStart}</p>
         <h1 className="text-2xl font-extrabold tracking-tight">Weekly review</h1>

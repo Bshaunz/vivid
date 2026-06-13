@@ -23,6 +23,7 @@ from app.routers.logs import _serialize_scores
 from app.schemas import (
     DailyAnalysisOut,
     DashboardOut,
+    DayScorePoint,
     WeeklyBodyweightOut,
 )
 
@@ -89,6 +90,22 @@ def get_dashboard(
     today_scores = _serialize_scores(scoring_service.score_daily(db, user, today))
     latest = _latest_bodyweight(db, user.id)
 
+    # Per-day historical scores for the Day Score hero (delta, personal best)
+    # and pillar sparklines. Computed only for logged days, so chart gaps are
+    # real gaps. Reuses the same engine as today's scores.
+    score_series: list[DayScorePoint] = []
+    for l in logs:
+        res = scoring_service.score_daily(db, user, l.date)
+        score_series.append(
+            DayScorePoint(
+                date=l.date,
+                day_score=res.day.day_score,
+                health=_pillar_value(res, "Health"),
+                fitness=_pillar_value(res, "Fitness"),
+                finance=_pillar_value(res, "Finances"),
+            )
+        )
+
     weekly_bw: list[WeeklyBodyweightOut] = []
     week_start = scoring_service.iso_week_start(today)
     for i in range(12):
@@ -112,9 +129,15 @@ def get_dashboard(
         to_date=today,
         days=day_rows,
         today_scores=today_scores,
+        score_series=score_series,
         latest_bodyweight=latest,
         weekly_bodyweight=weekly_bw,
     )
+
+
+def _pillar_value(result: scoring_service.ScoreResult, pillar: str) -> float | None:
+    ps = result.pillars.get(pillar)
+    return ps.score if ps is not None else None
 
 
 def _latest_bodyweight(db: Session, user_id: str) -> float | None:

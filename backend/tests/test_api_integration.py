@@ -241,3 +241,8 @@ def test_dashboard_returns_analysis_rows_and_scores(client):
     assert 0 <= body["today_scores"]["day_score"] <= 100
     # weekly median bodyweight series carries the single sample week
     assert any(w["week_start"] == "2026-06-08" for w in body["weekly_bodyweight"])
+    # per-day score series powers the hero delta + pillar sparklines
+    pts = {p["date"]: p for p in body["score_series"]}
+    assert "2026-06-10" in pts
+    assert 0 <= pts["2026-06-10"]["day_score"] <= 100
+    assert pts["2026-06-10"]["fitness"] is not None  # evening logged that day
