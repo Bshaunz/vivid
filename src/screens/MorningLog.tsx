@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useApp } from "@/context/AppContext";
 import { useToast } from "@/components/Toast";
 import { NumberStepper } from "@/components/NumberStepper";
+import { LogSkeleton } from "@/components/Skeleton";
 import { addDays, todayISO } from "@/lib/dates";
 import * as api from "@/lib/apiClient";
 import type { DailyLog } from "@/types/domain";
@@ -68,7 +69,7 @@ export default function MorningLog() {
     };
   }, [ready, data]);
 
-  if (!ready || !seed) return null;
+  if (!ready || !seed) return <LogSkeleton title="Morning" />;
 
   if (todayLog?.morning_done && !editing) {
     return <MorningComplete log={todayLog} onEdit={() => setEditing(true)} />;
@@ -138,7 +139,7 @@ function MorningForm({
   existing: DailyLog | null;
   onSaved: () => void;
 }) {
-  const { data, profile, refresh } = useApp();
+  const { profile, refresh } = useApp();
   const { show } = useToast();
   const unit = profile?.unit_pref ?? "lbs";
 
@@ -171,30 +172,19 @@ function MorningForm({
   };
 
   const mutation = useMutation({
-    mutationFn: async (v: MorningFormValues) => {
-      const date = todayISO();
-      const readiness = Number(v.morning_readiness);
-      const sleep = parseFloat(v.sleep_hours);
-      const rhr = v.rhr === "" ? null : Number(v.rhr);
-      const hrv = v.hrv === "" ? null : Number(v.hrv);
+    mutationFn: (v: MorningFormValues) => {
       const bwNum = parseFloat(v.bodyweight);
       const bw = v.bodyweight.trim() !== "" && Number.isFinite(bwNum) ? bwNum : null;
-
-      // Real API call first (server validation + scoring). Throws on failure;
-      // returns null in local-only mode (no VITE_API_URL).
-      const res = await api.saveMorningLog({
-        date,
-        morning_readiness: readiness,
-        sleep_hours: sleep,
-        rhr,
-        hrv,
+      // Single write path: POST to the API (server validation + scoring). The
+      // optional bodyweight rides along and becomes a bodyweight_entries row.
+      return api.saveMorningLog({
+        date: todayISO(),
+        morning_readiness: Number(v.morning_readiness),
+        sleep_hours: parseFloat(v.sleep_hours),
+        rhr: v.rhr === "" ? null : Number(v.rhr),
+        hrv: v.hrv === "" ? null : Number(v.hrv),
         bodyweight: bw,
       });
-
-      // Write-through to the local cache so context reads stay consistent.
-      await data.saveMorningLog(date, { morning_readiness: readiness, sleep_hours: sleep, rhr, hrv });
-      if (bw !== null) await data.addBodyweightEntry(bw);
-      return res;
     },
     onMutate: () => setSubmitted(true), // optimistic
     onError: () => {

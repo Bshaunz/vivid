@@ -141,3 +141,103 @@ def test_validation_rejects_unknown_field(client):
         },
     )
     assert r.status_code == 422
+
+
+# ── Read/CRUD endpoints (the cutover surface) ─────────────────────────────────
+
+
+def test_profile_read_and_update(client):
+    r = client.get("/api/profile")
+    assert r.status_code == 200
+    assert r.json()["active_pillars"] == ["Health", "Fitness", "Finances"]
+
+    r = client.put("/api/profile", json={"bodyweight_goal": 180.0, "daily_budget": 100.0})
+    assert r.status_code == 200
+    assert r.json()["bodyweight_goal"] == 180.0
+    assert client.get("/api/profile").json()["daily_budget"] == 100.0
+
+
+def test_habits_crud_and_soft_delete(client):
+    created = client.post(
+        "/api/habits",
+        json={"name": "Read 30 minutes", "pillar": "Health", "frequency_type": "daily"},
+    )
+    assert created.status_code == 201
+    hid = created.json()["id"]
+
+    assert any(h["id"] == hid for h in client.get("/api/habits?active_only=true").json())
+
+    renamed = client.put(f"/api/habits/{hid}", json={"name": "Read 45 minutes"})
+    assert renamed.json()["name"] == "Read 45 minutes"
+
+    assert client.delete(f"/api/habits/{hid}").status_code == 204
+    # soft delete: gone from active, still present (archived) in the full list
+    assert all(h["id"] != hid for h in client.get("/api/habits?active_only=true").json())
+    archived = next(h for h in client.get("/api/habits").json() if h["id"] == hid)
+    assert archived["is_active"] is False
+
+
+def test_habit_completion_persists(client):
+    hid = client.post("/api/habits", json={"name": "Cold shower"}).json()["id"]
+    r = client.put(f"/api/habits/{hid}/completion", json={"date": "2026-06-10", "completed": True})
+    assert r.status_code == 200 and r.json()["completed"] is True
+    rows = client.get("/api/habits/completions?from=2026-06-10&to=2026-06-10").json()
+    assert any(c["habit_id"] == hid and c["completed"] for c in rows)
+    # idempotent upsert on (habit, date)
+    client.put(f"/api/habits/{hid}/completion", json={"date": "2026-06-10", "completed": False})
+    rows = client.get("/api/habits/completions?from=2026-06-10&to=2026-06-10").json()
+    assert sum(1 for c in rows if c["habit_id"] == hid) == 1
+
+
+def test_goals_crud_display_only(client):
+    created = client.post(
+        "/api/goals",
+        json={
+            "name": "Cut to 180",
+            "type": "metric",
+            "metric_key": "weekly_median_bodyweight",
+            "target_value": 180,
+            "direction": "below",
+            "pillar": "Fitness",
+            "target_date": "2026-09-01",
+        },
+    )
+    assert created.status_code == 201
+    gid = created.json()["id"]
+    # shape validation mirrors the DB check constraint
+    bad = client.post("/api/goals", json={"name": "broken", "type": "metric", "target_date": "2026-09-01"})
+    assert bad.status_code == 422
+    assert client.delete(f"/api/goals/{gid}").status_code == 204
+
+
+def test_weekly_upsert_and_summary(client):
+    # 2026-06-08 is the ISO Monday covering the 2026-06-10 logs above.
+    r = client.post(
+        "/api/weekly",
+        json={"week_start": "2026-06-08", "capital_allocated": 500, "bottleneck_audit": "late training"},
+    )
+    assert r.status_code == 200 and r.json()["capital_allocated"] == 500
+    # ISO-Monday enforcement
+    assert client.post("/api/weekly", json={"week_start": "2026-06-09", "capital_allocated": 0}).status_code == 422
+
+    summary = client.get("/api/weekly/2026-06-08/summary").json()
+    assert summary["median_bodyweight"] == 184.0  # single sample from the morning log
+    assert summary["n_bw_samples"] == 1 and summary["low_confidence"] is True
+    assert summary["training_sessions"] == 1  # 2026-06-10 training_done=true
+    assert summary["evenings_logged"] == 1
+
+
+def test_dashboard_returns_analysis_rows_and_scores(client):
+    r = client.get("/api/dashboard?days=30")
+    assert r.status_code == 200
+    body = r.json()
+    # flattened v_daily_analysis rows include the 2026-06-10 day
+    dates = [d["date"] for d in body["days"]]
+    assert "2026-06-10" in dates
+    day = next(d for d in body["days"] if d["date"] == "2026-06-10")
+    assert day["evening_done"] is True
+    assert "habit_completion_ratio" in day
+    # today's scores present and well-formed
+    assert 0 <= body["today_scores"]["day_score"] <= 100
+    # weekly median bodyweight series carries the single sample week
+    assert any(w["week_start"] == "2026-06-08" for w in body["weekly_bodyweight"])

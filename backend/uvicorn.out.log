@@ -1,0 +1,8 @@
+INFO:     127.0.0.1:61351 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61351 - "GET /api/profile HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61351 - "PUT /api/profile HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61351 - "POST /api/habits HTTP/1.1" 201 Created
+INFO:     127.0.0.1:61351 - "PUT /api/habits/1/completion HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61351 - "POST /api/logs/morning HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61351 - "GET /api/dashboard?days=14 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61351 - "GET /api/habits?active_only=true HTTP/1.1" 200 OK

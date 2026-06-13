@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useApp } from "@/context/AppContext";
+import { LogSkeleton } from "@/components/Skeleton";
 import { isSunday, parseISODate, todayISO, weekStartISO } from "@/lib/dates";
 import type { WeeklyLog as WeeklyLogRow, WeeklySummary } from "@/types/domain";
 
@@ -57,7 +58,7 @@ export default function WeeklyLog() {
     return <WeeklyLocked today={today} />;
   }
 
-  if (!ready || !seed) return null;
+  if (!ready || !seed) return <LogSkeleton title="Weekly review" />;
 
   if (seed.existing && !editing) {
     return <WeeklyComplete log={seed.existing} summary={seed.summary} onEdit={() => setEditing(true)} />;

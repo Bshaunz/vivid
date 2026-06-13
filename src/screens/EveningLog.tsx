@@ -5,6 +5,7 @@ import { useApp } from "@/context/AppContext";
 import { useToast } from "@/components/Toast";
 import { NumberStepper } from "@/components/NumberStepper";
 import { SubmittedCard } from "@/screens/MorningLog";
+import { LogSkeleton } from "@/components/Skeleton";
 import { todayISO } from "@/lib/dates";
 import * as api from "@/lib/apiClient";
 import type { DailyLog, Habit } from "@/types/domain";
@@ -59,7 +60,7 @@ export default function EveningLog() {
     };
   }, [ready, data]);
 
-  if (!ready || completionSeed === null) return null;
+  if (!ready || completionSeed === null) return <LogSkeleton title="Evening" />;
 
   if (todayLog?.evening_done && !editing) {
     return <EveningComplete log={todayLog} onEdit={() => setEditing(true)} />;
@@ -171,40 +172,23 @@ function EveningForm({
   const mutation = useMutation({
     mutationFn: async (v: EveningFormValues) => {
       const date = todayISO();
-      const training = v.training_done === "yes"; // required:true guarantees non-null
-      const deepWork = parseFloat(v.deep_work_hours);
-      const spend = parseFloat(v.discretionary_spend);
-      const macro = v.macro_adherence === null ? null : v.macro_adherence === "yes";
-      const calVar = v.caloric_variance_pct === "" ? null : parseFloat(v.caloric_variance_pct);
-      const rpe = v.workout_rpe === "" ? null : Number(v.workout_rpe);
-      const reflection = v.daily_reflection.trim() === "" ? null : v.daily_reflection.trim();
       const bwNum = parseFloat(v.bodyweight);
       const bw = v.bodyweight.trim() !== "" && Number.isFinite(bwNum) ? bwNum : null;
 
+      // Single scored write to the API (bodyweight rides along as an entry).
       const res = await api.saveEveningLog({
         date,
-        training_done: training,
-        deep_work_hours: deepWork,
-        discretionary_spend: spend,
-        macro_adherence: macro,
-        caloric_variance_pct: calVar,
-        workout_rpe: rpe,
-        daily_reflection: reflection,
+        training_done: v.training_done === "yes", // required:true guarantees non-null
+        deep_work_hours: parseFloat(v.deep_work_hours),
+        discretionary_spend: parseFloat(v.discretionary_spend),
+        macro_adherence: v.macro_adherence === null ? null : v.macro_adherence === "yes",
+        caloric_variance_pct: v.caloric_variance_pct === "" ? null : parseFloat(v.caloric_variance_pct),
+        workout_rpe: v.workout_rpe === "" ? null : Number(v.workout_rpe),
+        daily_reflection: v.daily_reflection.trim() === "" ? null : v.daily_reflection.trim(),
         bodyweight: bw,
       });
 
-      // Write-through to local cache (habit completions stay local until the
-      // completions endpoint lands in a later step).
-      await data.saveEveningLog(date, {
-        training_done: training,
-        deep_work_hours: deepWork,
-        discretionary_spend: spend,
-        macro_adherence: macro,
-        caloric_variance_pct: calVar,
-        workout_rpe: rpe,
-        daily_reflection: reflection,
-      });
-      if (bw !== null) await data.addBodyweightEntry(bw);
+      // Persist each habit completion directly to habit_completions (directive 3).
       for (const h of habits) {
         await data.setHabitCompletion(h.id, date, v.habits?.[String(h.id)] === true);
       }

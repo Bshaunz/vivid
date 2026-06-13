@@ -10,9 +10,9 @@ No endpoint accepts a user_id from the client (§3.1): the row owner is always
 the authenticated user. Bodyweight, when supplied, becomes a bodyweight_entries
 row (§4) — never a daily_logs column.
 """
-from datetime import date as dt_date
+from datetime import date as dt_date, datetime, time, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,6 @@ from app import scoring_service
 from app.auth import get_current_user
 from app.db import get_db
 from app.models import BodyweightEntry, DailyLog, User
-from app.ratelimit import limiter
 from app.schemas import (
     DailyLogOut,
     EveningLogIn,
@@ -39,6 +38,13 @@ def _get_or_create_log(db: Session, user_id: str, d: dt_date) -> DailyLog:
         log = DailyLog(user_id=user_id, date=d)
         db.add(log)
     return log
+
+
+def _add_bodyweight(db: Session, user_id: str, value: float, log_date: dt_date) -> None:
+    # Timestamp the sample on the log's own date (noon UTC) so a backfilled log
+    # lands the entry in the correct ISO week for the weekly median (§4).
+    logged_at = datetime.combine(log_date, time(12, 0), tzinfo=timezone.utc)
+    db.add(BodyweightEntry(user_id=user_id, value=value, logged_at=logged_at))
 
 
 def _serialize_scores(result: scoring_service.ScoreResult) -> ScoresOut:
@@ -64,11 +70,35 @@ def _serialize_scores(result: scoring_service.ScoreResult) -> ScoresOut:
     )
 
 
+@router.get("", response_model=list[DailyLogOut])
+def list_logs(
+    from_date: dt_date = Query(alias="from"),
+    to_date: dt_date = Query(alias="to"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[DailyLog]:
+    stmt = (
+        select(DailyLog)
+        .where(DailyLog.user_id == user.id, DailyLog.date >= from_date, DailyLog.date <= to_date)
+        .order_by(DailyLog.date)
+    )
+    return list(db.scalars(stmt).all())
+
+
+@router.get("/{log_date}", response_model=DailyLogOut | None)
+def get_log(
+    log_date: dt_date,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> DailyLog | None:
+    return db.scalar(
+        select(DailyLog).where(DailyLog.user_id == user.id, DailyLog.date == log_date)
+    )
+
+
 @router.post("/morning", response_model=LogSaveResponse)
-@limiter.limit("60/minute")
 def save_morning(
     payload: MorningLogIn,
-    request: Request,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> LogSaveResponse:
@@ -79,7 +109,7 @@ def save_morning(
     log.hrv = payload.hrv
     log.morning_done = True
     if payload.bodyweight is not None:
-        db.add(BodyweightEntry(user_id=user.id, value=payload.bodyweight))
+        _add_bodyweight(db, user.id, payload.bodyweight, payload.date)
     db.commit()
     db.refresh(log)
 
@@ -88,10 +118,8 @@ def save_morning(
 
 
 @router.post("/evening", response_model=LogSaveResponse)
-@limiter.limit("60/minute")
 def save_evening(
     payload: EveningLogIn,
-    request: Request,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> LogSaveResponse:
@@ -105,7 +133,7 @@ def save_evening(
     log.daily_reflection = payload.daily_reflection
     log.evening_done = True
     if payload.bodyweight is not None:
-        db.add(BodyweightEntry(user_id=user.id, value=payload.bodyweight))
+        _add_bodyweight(db, user.id, payload.bodyweight, payload.date)
     db.commit()
     db.refresh(log)
 

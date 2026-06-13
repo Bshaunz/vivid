@@ -1,19 +1,10 @@
 /**
- * Thin FastAPI client for the log endpoints (build step 5).
- *
- * Transitional by design: the backend currently exposes only morning/evening,
- * so reads still come from the local DataLayer cache. When VITE_API_URL is set,
- * a save POSTs to the real API (server-side validation + scoring) and the
- * computed scores come back in the response. When it is unset, the client is a
- * no-op and the app runs purely on localStorage — so the UI works offline and
- * in pure-frontend demos with the identical optimistic flow.
+ * Scored-write helpers for the log endpoints. These return the computed scores
+ * (the engine runs server-side on every save), which the log screens surface
+ * immediately. Reads and CRUD go through ApiDataLayer; this module is just the
+ * thin "save and get my scores back" path.
  */
-
-const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "");
-
-export interface ApiError extends Error {
-  status?: number;
-}
+import { request } from "@/lib/http";
 
 export interface PillarScoreOut {
   score: number | null;
@@ -58,36 +49,10 @@ export interface EveningPayload {
   bodyweight?: number | null;
 }
 
-/** True when a real backend is wired; lets screens write-through to local too. */
-export function apiConfigured(): boolean {
-  return !!BASE;
+export function saveMorningLog(payload: MorningPayload): Promise<LogSaveResponse> {
+  return request<LogSaveResponse>("POST", "/api/logs/morning", payload);
 }
 
-async function post<T>(path: string, body: unknown): Promise<T | null> {
-  if (!BASE) return null; // local-only mode
-  let res: Response;
-  try {
-    res = await fetch(`${BASE}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch (cause) {
-    const err: ApiError = new Error("Network error");
-    throw Object.assign(err, { cause });
-  }
-  if (!res.ok) {
-    const err: ApiError = new Error(`Request failed (${res.status})`);
-    err.status = res.status;
-    throw err;
-  }
-  return (await res.json()) as T;
-}
-
-export function saveMorningLog(payload: MorningPayload): Promise<LogSaveResponse | null> {
-  return post<LogSaveResponse>("/api/logs/morning", payload);
-}
-
-export function saveEveningLog(payload: EveningPayload): Promise<LogSaveResponse | null> {
-  return post<LogSaveResponse>("/api/logs/evening", payload);
+export function saveEveningLog(payload: EveningPayload): Promise<LogSaveResponse> {
+  return request<LogSaveResponse>("POST", "/api/logs/evening", payload);
 }
