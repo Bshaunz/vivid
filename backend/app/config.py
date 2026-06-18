@@ -15,6 +15,9 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     synthesis_prompt_path: str = ""
+    # Real-client knobs (dormant under the mock; mock reports MOCK_MODEL itself).
+    synthesis_model: str = "claude-opus-4-8"
+    synthesis_max_tokens: int = 1500
 
     max_monthly_tokens: int = 2_000_000
     daily_token_budget_per_user: int = 60_000

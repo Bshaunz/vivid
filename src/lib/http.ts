@@ -7,7 +7,7 @@
  */
 const RAW_BASE =
   (import.meta.env.VITE_API_URL as string | undefined) ??
-  (import.meta.env.DEV ? "http://localhost:8000" : "");
+  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "");
 
 export const API_BASE = RAW_BASE.replace(/\/$/, "");
 

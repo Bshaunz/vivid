@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
-import { useDashboard, type DashboardData } from "@/hooks/useDashboard";
+import { useDashboard, type DashboardData, type Deviation } from "@/hooks/useDashboard";
 import { TrendChart, type Point } from "@/components/TrendChart";
 import { SkeletonBlock } from "@/components/Skeleton";
 
@@ -76,6 +76,7 @@ export default function Home() {
       ) : (
         <>
           <DayScoreHero data={data} />
+          <WhatChangedPanel data={data} />
           <PillarBars data={data} />
           <TrendSection
             data={data}
@@ -145,6 +146,77 @@ function PillarBars({ data }: { data: DashboardData }) {
   );
 }
 
+// ── What Changed (14-day deviation alerts) ────────────────────────────────────
+
+const DEV_META: Record<string, { label: string; unit: "currency" | "hours" | "points" }> = {
+  sleep_hours: { label: "Sleep", unit: "hours" },
+  discretionary_spend: { label: "Discretionary spend", unit: "currency" },
+  morning_readiness: { label: "Morning readiness", unit: "points" },
+  rhr: { label: "Resting HR", unit: "points" },
+  hrv: { label: "HRV", unit: "points" },
+  deep_work_hours: { label: "Deep work", unit: "hours" },
+};
+
+function deviationVerb(dev: Deviation): string {
+  if (dev.direction === "up") return dev.valence === "adverse" ? "spiked" : "rose";
+  return dev.valence === "adverse" ? "dropped" : "fell";
+}
+
+/** Splits the alert into plain-text parts so the magnitude can carry the
+ *  valence color while the rest of the sentence stays legible. */
+function deviationCopy(dev: Deviation): { lead: string; magnitude: string; tail: string } {
+  const meta = DEV_META[dev.metric_key] ?? { label: dev.metric_key, unit: "points" as const };
+  let magnitude: string;
+  let withBy: boolean;
+  if (dev.pct_change != null) {
+    magnitude = `${Math.round(Math.abs(dev.pct_change) * 100)}%`;
+    withBy = false;
+  } else {
+    // mean≈0 fallback: report the absolute move (e.g. "$50.00", "1.5h").
+    const a = Math.abs(dev.abs_change);
+    magnitude =
+      meta.unit === "currency" ? `$${a.toFixed(2)}` : meta.unit === "hours" ? `${a.toFixed(1)}h` : `${Math.round(a)}`;
+    withBy = true;
+  }
+  return {
+    lead: `${meta.label} ${deviationVerb(dev)} ${withBy ? "by " : ""}`,
+    magnitude,
+    tail: " vs your 14-day norm",
+  };
+}
+
+/** Hidden entirely when there are no significant deviations (within-norm, or
+ *  fewer than 7 logged days in the window). No AI blue here — baseline reality. */
+function WhatChangedPanel({ data }: { data: DashboardData }) {
+  if (data.deviations.length === 0) return null;
+  return (
+    <section className="flex flex-col gap-2">
+      <p className="label">What changed</p>
+      <div className="flex flex-col gap-1.5">
+        {data.deviations.map((dev) => (
+          <DeviationRow key={dev.metric_key} dev={dev} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DeviationRow({ dev }: { dev: Deviation }) {
+  const tone = dev.valence === "adverse" ? "text-negative" : "text-positive";
+  const arrow = dev.direction === "up" ? "▲" : "▼";
+  const { lead, magnitude, tail } = deviationCopy(dev);
+  return (
+    <div className="flex items-center gap-2.5 rounded-[14px] border border-card-border bg-card px-4 py-3">
+      <span aria-hidden className={`text-xs font-bold ${tone}`}>{arrow}</span>
+      <p className="text-sm text-white/85">
+        {lead}
+        <span className={`font-semibold ${tone}`}>{magnitude}</span>
+        {tail}
+      </p>
+    </div>
+  );
+}
+
 // ── Trend chart ─────────────────────────────────────────────────────────────
 
 function buildSeries(data: DashboardData, metric: MetricKey): Point[] {
@@ -185,38 +257,81 @@ function TrendSection({
 
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex flex-wrap gap-1.5">
-        {METRICS.map((m) => (
-          <Chip key={m.key} active={metric === m.key} onClick={() => setMetric(m.key)}>
-            {m.label}
-          </Chip>
-        ))}
+      {/* Mobile-first: native dropdowns instead of overflowing chip rows. */}
+      <div className="flex gap-3">
+        <SelectField
+          label="Metric"
+          value={metric}
+          onChange={(v) => setMetric(v as MetricKey)}
+          options={METRICS.map((m) => ({ value: m.key, label: m.label }))}
+        />
+        <SelectField
+          label="Range"
+          value={String(rangeDays)}
+          onChange={(v) => setRangeDays(Number(v))}
+          options={DURATIONS.map((d) => ({ value: String(d.days), label: d.label }))}
+        />
       </div>
       <div className="rounded-[14px] border border-card-border bg-card p-3">
         <TrendChart data={series} formatValue={fmt} />
-      </div>
-      <div className="flex gap-1.5">
-        {DURATIONS.map((d) => (
-          <Chip key={d.days} active={rangeDays === d.days} onClick={() => setRangeDays(d.days)}>
-            {d.label}
-          </Chip>
-        ))}
       </div>
     </section>
   );
 }
 
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+/** Themed native <select>: dark card surface, subtle border, custom chevron,
+ *  44px touch target. Native element keeps it accessible and OS-friendly on
+ *  iOS/Android (the picker is the platform's own). */
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  const id = useId();
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`h-8 rounded-[30px] border px-3 text-xs font-semibold ${
-        active ? "border-accent bg-accent text-white" : "border-card-border bg-card text-white/50"
-      }`}
+    <label htmlFor={id} className="flex flex-1 flex-col gap-1.5">
+      <span className="label">{label}</span>
+      <div className="relative">
+        <select
+          id={id}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-11 w-full appearance-none rounded-[14px] border border-card-border bg-card pl-4 pr-10 text-sm font-semibold text-white/90 focus:border-accent focus:outline-none"
+        >
+          {options.map((o) => (
+            <option key={o.value} value={o.value} className="bg-bg text-white">
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <ChevronDownIcon />
+      </div>
+    </label>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-white/50"
     >
-      {children}
-    </button>
+      <path d="m6 9 6 6 6-6" />
+    </svg>
   );
 }
 

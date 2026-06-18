@@ -15,6 +15,7 @@ import { SkeletonBlock } from "@/components/Skeleton";
 const Home = lazy(() => import("@/screens/Home"));
 const Pillars = lazy(() => import("@/screens/Pillars"));
 const Log = lazy(() => import("@/screens/Log"));
+const AISynthesis = lazy(() => import("@/screens/AISynthesis"));
 const Placeholder = lazy(() => import("@/screens/Placeholder"));
 
 function RouteFallback() {
@@ -39,10 +40,7 @@ export default function App() {
               path="/goals"
               element={<Placeholder title="Goals" note="Goal tracking arrives in build step 13. Goals are display-only — they never affect your scores." />}
             />
-            <Route
-              path="/ai"
-              element={<Placeholder title="AI Synthesis" note="Your weekly synthesis lands here once step 10 ships — a plain-language read of what changed across Health, Fitness and Finance." />}
-            />
+            <Route path="/ai" element={<AISynthesis />} />
             <Route
               path="/settings"
               element={<Placeholder title="Settings" note="Pillars, habits, budget, bodyweight goal, units, export and account deletion arrive in build step 14." />}

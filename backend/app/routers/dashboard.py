@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import scoring_service
+from app import baseline_service, scoring_service
 from app.auth import get_current_user
 from app.db import get_db
 from app.models import DailyLog, HabitCompletion, User
@@ -24,6 +24,7 @@ from app.schemas import (
     DailyAnalysisOut,
     DashboardOut,
     DayScorePoint,
+    DeviationOut,
     WeeklyBodyweightOut,
 )
 
@@ -124,6 +125,21 @@ def get_dashboard(
         )
     weekly_bw.reverse()  # chronological
 
+    # "What Changed" — significant deviations of the latest logged day vs the
+    # 14-day rolling norm. Computed LIVE (independent of the persisted snapshot).
+    deviations = [
+        DeviationOut.model_validate(d) for d in baseline_service.detect_deviations(db, user)
+    ]
+
+    # Opportunistic norm-snapshot upsert (the "job" without job infra). Best
+    # effort: a failure here must never break the dashboard read, and the live
+    # `deviations` above don't depend on it.
+    try:
+        baseline_service.refresh_baselines(db, user)
+        db.commit()
+    except Exception:
+        db.rollback()
+
     return DashboardOut(
         from_date=from_date,
         to_date=today,
@@ -132,6 +148,7 @@ def get_dashboard(
         score_series=score_series,
         latest_bodyweight=latest,
         weekly_bodyweight=weekly_bw,
+        deviations=deviations,
     )
 
 

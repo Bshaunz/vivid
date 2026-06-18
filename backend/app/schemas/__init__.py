@@ -348,6 +348,27 @@ class DayScorePoint(BaseModel):
     finance: float | None
 
 
+class DeviationOut(BaseModel):
+    """One significant "What Changed" alert: the latest logged value vs the
+    user's 14-day rolling norm. valence drives the red/green treatment
+    (adverse → negative, favorable → positive). pct_change is null when the
+    mean≈0 absolute-delta fallback was used."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    metric_key: str
+    latest_value: float
+    latest_date: dt_date
+    baseline_mean: float
+    baseline_sd: float
+    z_score: float
+    abs_change: float
+    pct_change: float | None
+    direction: Literal["up", "down"]
+    valence: Literal["adverse", "favorable"]
+    n_observations: int
+
+
 class DashboardOut(BaseModel):
     from_date: dt_date
     to_date: dt_date
@@ -356,3 +377,14 @@ class DashboardOut(BaseModel):
     score_series: list[DayScorePoint]
     latest_bodyweight: float | None
     weekly_bodyweight: list[WeeklyBodyweightOut]
+    # Live 14-day deviation alerts for the Home "What Changed" panel (step 8).
+    deviations: list[DeviationOut]
+
+
+# ── Synthesis (§6 step 10) — lives in app/schemas/synthesis.py, re-exported here
+# so the rest of the app keeps importing `from app.schemas import ...`.
+from app.schemas.synthesis import (  # noqa: E402
+    SynthesisGenerateIn,
+    SynthesisOut,
+    parse_insights,
+)

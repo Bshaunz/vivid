@@ -198,8 +198,18 @@ export interface AISynthesis {
   user_id: string;
   generated_at: string;
   type: SynthesisType;
+  /** ISO Monday of the synthesized week (added step 10). */
+  week_start: string;
+  /** 0–100, deterministic mean Day Score recomputed by the engine on read
+   *  (added step 10). Never produced by the LLM. */
+  optimization_score: number;
+  /** Bullet insights parsed server-side from `content` (added step 10). */
+  insights: string[];
   content: string;
   tokens_in: number;
   tokens_out: number;
   model: string;
+  /** True when the POST returned an idempotent cache hit rather than a fresh
+   *  generation (present on generate responses; absent on stored reads). */
+  cached?: boolean;
 }

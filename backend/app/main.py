@@ -8,7 +8,16 @@ from app.auth import get_current_user
 from app.config import get_settings
 from app.models import User
 from app.ratelimit import limiter
-from app.routers import bodyweight, dashboard, goals, habits, logs, profile, weekly
+from app.routers import (
+    bodyweight,
+    dashboard,
+    goals,
+    habits,
+    logs,
+    profile,
+    synthesis,
+    weekly,
+)
 
 settings = get_settings()
 
@@ -68,3 +77,4 @@ app.include_router(habits.router)
 app.include_router(goals.router)
 app.include_router(weekly.router)
 app.include_router(dashboard.router)
+app.include_router(synthesis.router)

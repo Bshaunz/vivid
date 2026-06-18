@@ -332,6 +332,10 @@ class AISynthesis(Base):
     type: Mapped[str] = mapped_column(
         str_enum("weekly", name="synthesis_type"), nullable=False, default="weekly"
     )
+    # ISO Monday of the synthesized week. Per-ISO-week idempotency key (§6 step 10);
+    # the ORM always supplies this value. Postgres additionally enforces isodow=1
+    # at the DB layer (mirrors weekly_logs); SQLite relies on the schema validator.
+    week_start: Mapped[date] = mapped_column(Date, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tokens_in: Mapped[int] = mapped_column(Integer, nullable=False)
     tokens_out: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -339,5 +343,8 @@ class AISynthesis(Base):
 
     __table_args__ = (
         CheckConstraint("tokens_in >= 0 AND tokens_out >= 0", name="ck_synthesis_tokens"),
+        UniqueConstraint(
+            "user_id", "type", "week_start", name="uq_synthesis_user_type_week"
+        ),
         Index("idx_ai_syntheses_user_time", "user_id", "generated_at"),
     )

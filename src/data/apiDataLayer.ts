@@ -24,9 +24,8 @@ import type {
  * the domain types. The server owns ownership/validation (§3.1, §3.5), so this
  * layer is a thin transport.
  *
- * Syntheses have no endpoint yet (AI ships at step 10); those methods return
- * empty until the router lands, so the AI screen degrades gracefully rather
- * than erroring.
+ * Synthesis reads are live as of step 10 (GET /api/synthesis*); generation is a
+ * server-only POST exposed via apiClient.generateWeeklySynthesis, not DataLayer.
  */
 export class ApiDataLayer implements DataLayer {
   // ── User ─────────────────────────────────────────────────────────────────
@@ -148,12 +147,13 @@ export class ApiDataLayer implements DataLayer {
     return request<void>("DELETE", `/api/goals/${id}`);
   }
 
-  // ── AI syntheses (endpoint lands at build step 10) ──────────────────────────
-  async listSyntheses(): Promise<AISynthesis[]> {
-    return [];
+  // ── AI syntheses ────────────────────────────────────────────────────────────
+  listSyntheses(opts?: { limit?: number }): Promise<AISynthesis[]> {
+    const q = opts?.limit !== undefined ? `?limit=${opts.limit}` : "";
+    return request<AISynthesis[]>("GET", `/api/synthesis${q}`);
   }
 
-  async getSynthesisForWeek(): Promise<AISynthesis | null> {
-    return null;
+  getSynthesisForWeek(weekStart: string): Promise<AISynthesis | null> {
+    return request<AISynthesis | null>("GET", `/api/synthesis/weekly/${weekStart}`);
   }
 }

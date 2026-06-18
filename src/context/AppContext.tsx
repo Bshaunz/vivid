@@ -34,6 +34,8 @@ export const qk = {
   goals: ["goals", "active"] as const,
   dashboard: ["dashboard"] as const,
   completions: (from: string, to: string) => ["completions", from, to] as const,
+  syntheses: ["syntheses"] as const,
+  synthesisForWeek: (weekStart: string) => ["synthesis", weekStart] as const,
 };
 
 export function AppProvider({ children }: { children: ReactNode }) {

@@ -42,6 +42,23 @@ export interface WeeklyBodyweightRow {
   low_confidence: boolean;
 }
 
+/** One "What Changed" alert: the latest logged value vs the 14-day rolling norm.
+ *  `valence` drives the red/green treatment; `pct_change` is null when the
+ *  mean≈0 absolute-delta fallback was used (read abs_change instead). */
+export interface Deviation {
+  metric_key: string;
+  latest_value: number;
+  latest_date: string;
+  baseline_mean: number;
+  baseline_sd: number;
+  z_score: number;
+  abs_change: number;
+  pct_change: number | null;
+  direction: "up" | "down";
+  valence: "adverse" | "favorable";
+  n_observations: number;
+}
+
 export interface DashboardData {
   from_date: string;
   to_date: string;
@@ -50,6 +67,7 @@ export interface DashboardData {
   score_series: DayScorePoint[];
   latest_bodyweight: number | null;
   weekly_bodyweight: WeeklyBodyweightRow[];
+  deviations: Deviation[];
 }
 
 export function useDashboard(days: number) {
