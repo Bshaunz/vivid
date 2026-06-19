@@ -123,11 +123,16 @@ def set_completion(
     )
     if row is None:
         row = HabitCompletion(
-            user_id=user.id, habit_id=habit_id, date=payload.date, completed=payload.completed
+            user_id=user.id,
+            habit_id=habit_id,
+            date=payload.date,
+            completed=payload.completed,
+            quantity=payload.quantity,
         )
         db.add(row)
     else:
         row.completed = payload.completed
+        row.quantity = payload.quantity
     db.commit()
     db.refresh(row)
     return row

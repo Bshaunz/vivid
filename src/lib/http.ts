@@ -13,6 +13,8 @@ export const API_BASE = RAW_BASE.replace(/\/$/, "");
 
 export interface ApiError extends Error {
   status?: number;
+  /** FastAPI `detail` string, when the error body carried one. */
+  detail?: string;
 }
 
 const TIMEOUT_MS = 15_000;
@@ -43,8 +45,17 @@ export async function request<T>(
     clearTimeout(timer);
   }
   if (!res.ok) {
-    const err: ApiError = new Error(`Request failed (${res.status})`);
+    // Surface FastAPI's `detail` (string form) so callers can show the reason.
+    let detail: string | undefined;
+    try {
+      const data = (await res.json()) as { detail?: unknown };
+      if (typeof data?.detail === "string") detail = data.detail;
+    } catch {
+      /* non-JSON body — fall back to the generic message */
+    }
+    const err: ApiError = new Error(detail ?? `Request failed (${res.status})`);
     err.status = res.status;
+    err.detail = detail;
     throw err;
   }
   if (res.status === 204) return undefined as T;

@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 
 from app import llm, scoring_service
 from app.config import get_settings
+from app.services import context_builder
 from app.models import AISynthesis, DailyLog, User, WeeklyLog, utcnow
 
 SYNTHESIS_TYPE = "weekly"
@@ -373,12 +374,19 @@ def generate_weekly(
 
     system_prompt = llm.load_system_prompt()           # model-only; never echoed
     ctx = assemble_context(db, user, week_start)        # may raise NoDataForWeek
-    _check_budget(db, user, system_prompt, ctx.user_block)  # may raise BudgetExceeded
+
+    # The model payload is the dense cross-pillar aggregate (step 11), carrying
+    # the deterministic correlations to narrate. Still sealed in <user_data>; the
+    # optimization score is never included.
+    user_block = context_builder.get_weekly_context(
+        db, user.id, week_start, correlations=ctx.insights
+    )
+    _check_budget(db, user, system_prompt, user_block)  # may raise BudgetExceeded
 
     settings = get_settings()
     result = llm.complete_synthesis(
         system_prompt,
-        ctx.user_block,
+        user_block,
         max_tokens=settings.synthesis_max_tokens,
         mock_summary=ctx.summary,
         mock_insights=ctx.insights,

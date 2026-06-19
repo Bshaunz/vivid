@@ -33,6 +33,8 @@ class MorningLogIn(_Base):
     sleep_hours: float = Field(ge=0, le=16)
     rhr: int | None = Field(default=None, ge=20, le=250)
     hrv: int | None = Field(default=None, ge=0, le=300)
+    # Optional free-text morning note ("Anything else?" wizard step).
+    morning_note: str | None = Field(default=None, max_length=1000)
     # Optional quick-entry → bodyweight_entries (30–300 kg / 66–660 lbs).
     bodyweight: float | None = Field(default=None, ge=30, le=660)
 
@@ -42,6 +44,9 @@ class MorningLogIn(_Base):
 class EveningLogIn(_Base):
     date: dt_date = Field(default_factory=dt_date.today)
     training_done: bool
+    # Token-contract status; null on legacy clients. The client keeps it
+    # consistent with training_done (trained ⇒ true).
+    workout_status: Literal["trained", "rest", "skipped"] | None = None
     deep_work_hours: float = Field(ge=0, le=24)
     discretionary_spend: float = Field(ge=0, lt=1e9)
     macro_adherence: bool | None = None
@@ -89,8 +94,10 @@ class DailyLogOut(BaseModel):
     sleep_hours: float | None
     rhr: int | None
     hrv: int | None
+    morning_note: str | None
     morning_done: bool
     training_done: bool | None
+    workout_status: Literal["trained", "rest", "skipped"] | None
     workout_rpe: int | None
     deep_work_hours: float | None
     macro_adherence: bool | None
@@ -121,6 +128,8 @@ class ProfileOut(BaseModel):
     active_pillars: list[Pillar]
     daily_budget: float | None
     bodyweight_goal: float | None
+    weekly_workout_target: int | None
+    weekly_rest_target: int | None
     consent_timestamp: datetime
     created_at: datetime
 
@@ -132,6 +141,8 @@ class ProfileUpdate(_Base):
     active_pillars: list[Pillar] | None = None
     daily_budget: float | None = Field(default=None, ge=0)
     bodyweight_goal: float | None = Field(default=None, ge=30, le=660)
+    weekly_workout_target: int | None = Field(default=None, ge=0, le=7)
+    weekly_rest_target: int | None = Field(default=None, ge=0, le=7)
 
 
 # ── Habits ────────────────────────────────────────────────────────────────────
@@ -148,6 +159,9 @@ class HabitOut(BaseModel):
     frequency_type: Literal["daily", "weekly", "monthly"]
     frequency_count: int
     frequency_days: list[int] | None
+    value_type: Literal["binary", "numeric"]
+    unit_label: str | None
+    target_per_session: float | None
     is_preset: bool
     is_active: bool
     created_at: datetime
@@ -160,6 +174,9 @@ class HabitCreate(_Base):
     frequency_type: Literal["daily", "weekly", "monthly"] = "daily"
     frequency_count: int = Field(default=1, ge=1)
     frequency_days: list[int] | None = None
+    value_type: Literal["binary", "numeric"] = "binary"
+    unit_label: str | None = Field(default=None, max_length=40)
+    target_per_session: float | None = Field(default=None, gt=0)
     is_preset: bool = False
     is_active: bool = True
 
@@ -178,6 +195,9 @@ class HabitUpdate(_Base):
     frequency_type: Literal["daily", "weekly", "monthly"] | None = None
     frequency_count: int | None = Field(default=None, ge=1)
     frequency_days: list[int] | None = None
+    value_type: Literal["binary", "numeric"] | None = None
+    unit_label: str | None = Field(default=None, max_length=40)
+    target_per_session: float | None = Field(default=None, gt=0)
     is_active: bool | None = None
 
 
@@ -189,11 +209,14 @@ class HabitCompletionOut(BaseModel):
     habit_id: int
     date: dt_date
     completed: bool
+    quantity: float | None
 
 
 class CompletionUpdate(_Base):
     date: dt_date = Field(default_factory=dt_date.today)
     completed: bool = True
+    # Optional per-session numeric volume (numeric habits only). Display-only.
+    quantity: float | None = Field(default=None, ge=0)
 
     _nf = field_validator("date")(_reject_future)
 
@@ -216,6 +239,7 @@ class GoalOut(BaseModel):
     target_date: dt_date
     is_active: bool
     completed: bool
+    is_recurring: bool
     created_at: datetime
 
 
@@ -230,6 +254,7 @@ class GoalCreate(_Base):
     target_date: dt_date
     is_active: bool = True
     completed: bool = False
+    is_recurring: bool = False
 
     @model_validator(mode="after")
     def _shape(self) -> "GoalCreate":
@@ -250,6 +275,7 @@ class GoalUpdate(_Base):
     target_date: dt_date | None = None
     is_active: bool | None = None
     completed: bool | None = None
+    is_recurring: bool | None = None
 
 
 # ── Weekly logs ───────────────────────────────────────────────────────────────

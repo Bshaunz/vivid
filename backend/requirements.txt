@@ -11,3 +11,9 @@ pydantic-settings>=2.9.1
 slowapi>=0.1.9
 PyJWT>=2.10.1
 anthropic>=0.52.0
+
+# Postgres driver — required in production (Supabase Postgres). Dev uses SQLite
+# (stdlib), so this is only exercised when DATABASE_URL points at Postgres. Drive
+# it via the SQLAlchemy scheme `postgresql+psycopg://…` (psycopg3 has current
+# cp31x wheels, matching the Python-version floor policy above).
+psycopg[binary]>=3.2

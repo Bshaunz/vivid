@@ -20,6 +20,7 @@ from datetime import date as dt_date
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
+from app import llm
 from app import synthesis_service as ss
 from app.auth import get_current_user
 from app.db import get_db
@@ -56,6 +57,15 @@ def generate_weekly(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"{e.scope} token budget exceeded; try again later.",
+        )
+    except llm.SynthesisLLMError:
+        # Provider timeout / rate limit / connection drop. The error is raised
+        # before any write, but roll back defensively so the request can never
+        # leave a half-open transaction, and surface a clean, retryable 503.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Synthesis is temporarily unavailable; please try again shortly.",
         )
     if not cached:
         db.commit()

@@ -175,11 +175,19 @@ def score_daily(db: Session, user: User, target: dt_date) -> ScoreResult:
 
     # Fitness — needs the evening log (training_done + deep_work).
     if log is not None and log.evening_done and log.training_done is not None and log.deep_work_hours is not None:
+        # Token-contract status, when logged, decides rest vs skip explicitly
+        # ("rest" → 0.5, "skipped" → 0.0); otherwise fall back to the
+        # frequency_days derivation for legacy/unset days (§6.5).
+        planned_rest = (
+            log.workout_status == "rest"
+            if log.workout_status is not None
+            else _planned_rest(by_pillar.get("Fitness", []), target)
+        )
         pillars["Fitness"] = scoring.score_fitness(
             scoring.FitnessInputs(
                 training_done=log.training_done,
                 deep_work_hours=log.deep_work_hours,
-                planned_rest=_planned_rest(by_pillar.get("Fitness", []), target),
+                planned_rest=planned_rest,
                 workout_rpe=log.workout_rpe,
             ),
             active_habit_count=count("Fitness"),

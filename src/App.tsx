@@ -15,6 +15,7 @@ import { SkeletonBlock } from "@/components/Skeleton";
 const Home = lazy(() => import("@/screens/Home"));
 const Pillars = lazy(() => import("@/screens/Pillars"));
 const Log = lazy(() => import("@/screens/Log"));
+const Goals = lazy(() => import("@/screens/Goals"));
 const AISynthesis = lazy(() => import("@/screens/AISynthesis"));
 const Placeholder = lazy(() => import("@/screens/Placeholder"));
 
@@ -36,10 +37,7 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/pillars" element={<Pillars />} />
             <Route path="/log" element={<Log />} />
-            <Route
-              path="/goals"
-              element={<Placeholder title="Goals" note="Goal tracking arrives in build step 13. Goals are display-only — they never affect your scores." />}
-            />
+            <Route path="/goals" element={<Goals />} />
             <Route path="/ai" element={<AISynthesis />} />
             <Route
               path="/settings"

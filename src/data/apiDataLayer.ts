@@ -105,8 +105,17 @@ export class ApiDataLayer implements DataLayer {
   }
 
   // ── Habit completions ────────────────────────────────────────────────────
-  setHabitCompletion(habitId: number, date: string, completed: boolean): Promise<HabitCompletion> {
-    return request<HabitCompletion>("PUT", `/api/habits/${habitId}/completion`, { date, completed });
+  setHabitCompletion(
+    habitId: number,
+    date: string,
+    completed: boolean,
+    quantity: number | null = null,
+  ): Promise<HabitCompletion> {
+    return request<HabitCompletion>("PUT", `/api/habits/${habitId}/completion`, {
+      date,
+      completed,
+      quantity,
+    });
   }
 
   getHabitCompletions(fromDate: string, toDate: string): Promise<HabitCompletion[]> {

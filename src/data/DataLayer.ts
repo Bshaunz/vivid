@@ -64,7 +64,12 @@ export interface DataLayer {
   archiveHabit(id: number): Promise<void>;
 
   // ── Habit completions ────────────────────────────────────────────────────
-  setHabitCompletion(habitId: number, date: string, completed: boolean): Promise<HabitCompletion>;
+  setHabitCompletion(
+    habitId: number,
+    date: string,
+    completed: boolean,
+    quantity?: number | null,
+  ): Promise<HabitCompletion>;
   /** Inclusive range, all habits. */
   getHabitCompletions(fromDate: string, toDate: string): Promise<HabitCompletion[]>;
 

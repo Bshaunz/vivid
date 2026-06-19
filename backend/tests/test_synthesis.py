@@ -35,6 +35,8 @@ os.environ.pop("SYNTHESIS_PROMPT_PATH", None)  # use the safe dev fallback promp
 for marker in ("RENDER", "VERCEL", "PRODUCTION"):
     os.environ.pop(marker, None)
 
+import anthropic  # noqa: E402
+import httpx  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import llm  # noqa: E402
@@ -310,3 +312,71 @@ def test_system_prompt_never_leaks_in_any_response(client):
     ]
     for text in bodies:
         assert SYSTEM_PROMPT not in text
+
+
+# ── Real-client error handling (step 10.5) ───────────────────────────────────
+
+# A throwaway httpx.Request/Response is all the SDK exception constructors need.
+_DUMMY_REQUEST = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+_PROVIDER_ERRORS = [
+    pytest.param(
+        anthropic.RateLimitError(
+            "slow down",
+            response=httpx.Response(429, request=_DUMMY_REQUEST),
+            body=None,
+        ),
+        "rate_limited",
+        id="rate_limit",
+    ),
+    pytest.param(
+        anthropic.APITimeoutError(_DUMMY_REQUEST),
+        "timeout",
+        id="timeout",
+    ),
+]
+
+# Distinctive sentinels so a leak would be unmistakable in the surfaced error.
+_SECRET_SYSTEM = "TOP-SECRET-SYNTHESIS-PROMPT-DO-NOT-LEAK"
+_SEALED_USER = "<user_data>private metrics 42 here</user_data>"
+
+
+@pytest.mark.parametrize("provider_exc, expected_reason", _PROVIDER_ERRORS)
+def test_complete_real_wraps_provider_errors_securely(
+    client, monkeypatch, provider_exc, expected_reason
+):
+    """_complete_real must catch the SDK's typed exceptions and re-raise a
+    SynthesisLLMError that: carries the coarse reason ("rate_limited"/"timeout"),
+    chains the original provider error as __cause__ (debuggable), leaks neither
+    the private system prompt nor the sealed <user_data> payload, and persists /
+    mutates nothing."""
+
+    class _RaisingMessages:
+        def create(self, **kwargs):
+            raise provider_exc
+
+    class _RaisingClient:
+        messages = _RaisingMessages()
+
+    # Swap the cached client builder for one whose .messages.create() throws.
+    monkeypatch.setattr(llm, "_client", lambda: _RaisingClient())
+
+    with SessionLocal() as db:
+        rows_before = db.query(AISynthesis).count()
+
+    with pytest.raises(llm.SynthesisLLMError) as excinfo:
+        llm._complete_real(_SECRET_SYSTEM, _SEALED_USER, max_tokens=128)
+
+    err = excinfo.value
+    # Coarse, non-sensitive reason — exactly the mapped code, nothing more.
+    assert err.reason == expected_reason
+    # The provider error is chained for debugging, and it is a real SDK error.
+    assert err.__cause__ is provider_exc
+    assert isinstance(err.__cause__, anthropic.APIError)
+    # Neither the prompt nor the sealed payload may appear in anything surfaced.
+    surfaced = f"{err!s} {err.reason} {err.args}"
+    assert _SECRET_SYSTEM not in surfaced
+    assert _SEALED_USER not in surfaced
+    # No row written; no half-open transaction left behind.
+    with SessionLocal() as db:
+        assert db.query(AISynthesis).count() == rows_before

@@ -74,6 +74,10 @@ class User(Base):
     )
     daily_budget: Mapped[float | None] = mapped_column(Float)
     bodyweight_goal: Mapped[float | None] = mapped_column(Float)
+    # Weekly token-contract targets (set in the weekly review). Null = not yet
+    # chosen → the client falls back to its sensible default (4 workouts / 3 rest).
+    weekly_workout_target: Mapped[int | None] = mapped_column(Integer)
+    weekly_rest_target: Mapped[int | None] = mapped_column(Integer)
     consent_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
@@ -84,6 +88,14 @@ class User(Base):
         CheckConstraint(
             "bodyweight_goal IS NULL OR bodyweight_goal BETWEEN 30 AND 660",
             name="ck_users_bw_goal",
+        ),
+        CheckConstraint(
+            "weekly_workout_target IS NULL OR weekly_workout_target BETWEEN 0 AND 7",
+            name="ck_users_workout_target",
+        ),
+        CheckConstraint(
+            "weekly_rest_target IS NULL OR weekly_rest_target BETWEEN 0 AND 7",
+            name="ck_users_rest_target",
         ),
     )
 
@@ -102,10 +114,20 @@ class DailyLog(Base):
     sleep_hours: Mapped[float | None] = mapped_column(Float)
     rhr: Mapped[int | None] = mapped_column(Integer)
     hrv: Mapped[int | None] = mapped_column(Integer)
+    # Optional free-text morning note/journal (the "Anything else?" wizard step).
+    # Mirrors daily_reflection's evening role; capped at 1000 chars like it.
+    morning_note: Mapped[str | None] = mapped_column(Text)
     morning_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Evening (PM)
     training_done: Mapped[bool | None] = mapped_column(Boolean)
+    # Token-contract training status: "trained" (1.0) / "rest" (0.5) / "skipped"
+    # (0.0). When present it drives the §6.5 planned-rest distinction explicitly;
+    # null falls back to the frequency_days derivation. training_done stays in
+    # sync (trained → true) so the evening_complete constraint + scoring hold.
+    workout_status: Mapped[str | None] = mapped_column(
+        str_enum("trained", "rest", "skipped", name="workout_status")
+    )
     workout_rpe: Mapped[int | None] = mapped_column(Integer)
     deep_work_hours: Mapped[float | None] = mapped_column(Float)
     macro_adherence: Mapped[bool | None] = mapped_column(Boolean)
@@ -140,6 +162,10 @@ class DailyLog(Base):
         CheckConstraint(
             "daily_reflection IS NULL OR length(daily_reflection) <= 1000",
             name="ck_daily_reflection_len",
+        ),
+        CheckConstraint(
+            "morning_note IS NULL OR length(morning_note) <= 1000",
+            name="ck_daily_morning_note_len",
         ),
         CheckConstraint(
             "NOT morning_done OR (morning_readiness IS NOT NULL AND sleep_hours IS NOT NULL)",
@@ -193,6 +219,17 @@ class Habit(Base):
     )
     frequency_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     frequency_days: Mapped[list | None] = mapped_column(JSON)  # ISO weekdays 1-7
+    # Tracking shape: "binary" = simple done/not-done completion; "numeric" logs a
+    # per-session quantity (unit_label + target_per_session). Display-only metadata
+    # — completions are still stored as done/not-done in habit_completions.
+    value_type: Mapped[str] = mapped_column(
+        str_enum("binary", "numeric", name="habit_value_type"),
+        nullable=False,
+        default="binary",
+        server_default="binary",
+    )
+    unit_label: Mapped[str | None] = mapped_column(String(40))  # e.g. "miles", "pages"
+    target_per_session: Mapped[float | None] = mapped_column(Float)  # default quantity
     is_preset: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -217,9 +254,14 @@ class HabitCompletion(Base):
     )
     date: Mapped[date] = mapped_column(Date, nullable=False)
     completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Per-session numeric volume for numeric habits (e.g. miles, pages), captured
+    # in the Evening Log wizard. Null for binary habits / when not supplied.
+    # Display-only metadata — scoring still counts logged sessions (§6.7).
+    quantity: Mapped[float | None] = mapped_column(Float)
 
     __table_args__ = (
         UniqueConstraint("user_id", "habit_id", "date", name="uq_completion_user_habit_date"),
+        CheckConstraint("quantity IS NULL OR quantity >= 0", name="ck_completion_quantity"),
         Index("idx_habit_completions_user_date", "user_id", "date"),
     )
 
@@ -271,6 +313,11 @@ class Goal(Base):
     pillar: Mapped[str | None] = mapped_column(str_enum(*PILLARS, name="pillar_type"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Recurring goals re-evaluate every period ("every week"); one-offs target a
+    # single period ("this week"). Display-only — feeds no score.
+    is_recurring: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )

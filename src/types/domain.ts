@@ -16,8 +16,12 @@
 
 export type Pillar = "Health" | "Fitness" | "Finances";
 export type FrequencyType = "daily" | "weekly" | "monthly";
+/** Tracking shape: a simple done/not-done completion vs. a per-session quantity. */
+export type HabitValueType = "binary" | "numeric";
 export type GoalType = "metric" | "habit";
 export type GoalDirection = "above" | "below";
+/** Token-contract training status: trained (1.0) / rest (0.5) / skipped (0.0). */
+export type WorkoutStatus = "trained" | "rest" | "skipped";
 /** MVP ships weekly only; post-launch types are added by migration. */
 export type SynthesisType = "weekly";
 export type CurrencyCode = "CAD" | "USD";
@@ -46,6 +50,10 @@ export interface UserProfile {
   daily_budget: number | null;
   /** Profile setting in v4, not a weekly-log field. Drives bw_trend (§6.3). */
   bodyweight_goal: number | null;
+  /** Weekly token-contract quotas (set in the weekly review). Null = unset →
+   *  the UI falls back to its 4-workout / 3-rest default. */
+  weekly_workout_target: number | null;
+  weekly_rest_target: number | null;
   consent_timestamp: string;
   created_at: string;
 }
@@ -60,10 +68,12 @@ export interface DailyLog {
   sleep_hours: number | null; // float, 0–16
   rhr: number | null;
   hrv: number | null;
+  morning_note: string | null; // optional free-text morning journal
   morning_done: boolean;
 
   // Evening (PM)
   training_done: boolean | null;
+  workout_status: WorkoutStatus | null; // explicit trained/rest/skipped token
   workout_rpe: number | null; // 1–10
   deep_work_hours: number | null;
   macro_adherence: boolean | null;
@@ -73,10 +83,12 @@ export interface DailyLog {
   evening_done: boolean;
 }
 
-/** Required morning fields are non-optional — the type enforces completeness. */
+/** Required morning fields are non-optional — the type enforces completeness.
+ *  Everything past the two essentials (note, rhr, hrv) is strictly optional. */
 export interface MorningLogInput {
   morning_readiness: number;
   sleep_hours: number;
+  morning_note?: string | null;
   rhr?: number | null;
   hrv?: number | null;
 }
@@ -84,6 +96,7 @@ export interface MorningLogInput {
 /** Required evening fields are non-optional — the type enforces completeness. */
 export interface EveningLogInput {
   training_done: boolean;
+  workout_status?: WorkoutStatus | null;
   deep_work_hours: number;
   discretionary_spend: number;
   macro_adherence?: boolean | null;
@@ -119,6 +132,12 @@ export interface Habit {
   frequency_type: FrequencyType;
   frequency_count: number;
   frequency_days: Weekday[] | null;
+  /** "binary" = done/not-done; "numeric" = logs a per-session quantity. */
+  value_type: HabitValueType;
+  /** Unit for numeric habits, e.g. "miles", "pages". Null for binary. */
+  unit_label: string | null;
+  /** Default quantity logged per session for numeric habits. Null for binary. */
+  target_per_session: number | null;
   is_preset: boolean;
   is_active: boolean;
   created_at: string;
@@ -132,6 +151,10 @@ export interface HabitCompletion {
   habit_id: number;
   date: string;
   completed: boolean;
+  /** Per-session numeric volume (numeric habits only), e.g. miles logged. Null
+   *  for binary habits or when not supplied. Display-only — scoring counts
+   *  sessions, not this quantity. */
+  quantity: number | null;
 }
 
 export interface WeeklyLog {
@@ -177,6 +200,9 @@ export interface Goal {
   target_date: string;
   is_active: boolean;
   completed: boolean;
+  /** Recurring goals re-evaluate every period ("every week"); one-offs target a
+   *  single period ("this week"). Display-only — feeds no score. */
+  is_recurring: boolean;
   created_at: string;
 }
 

@@ -1,0 +1,40 @@
+# Render Blueprint — VIVID FastAPI backend.
+# Apply via: Render Dashboard → New → Blueprint → point at this repo.
+# Secrets are declared with `sync: false` so Render prompts for them in the
+# dashboard and they are NEVER committed (§3.2). DB migrations are run as a
+# separate, pre-deploy step (see DEPLOYMENT.md) to keep deploys zero-downtime.
+services:
+  - type: web
+    name: vivid-api
+    runtime: python
+    rootDir: backend
+    plan: free # bump to "starter" for always-on + preDeployCommand support
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeploy: true
+    # On a paid plan you can migrate automatically before each release instead
+    # of by hand — uncomment and use the path that matches your DB (DEPLOYMENT.md):
+    # preDeployCommand: alembic upgrade head
+    envVars:
+      - key: DEV_MODE
+        value: "false" # prod: disables /docs and the localhost CORS regex
+      - key: PYTHON_VERSION
+        value: "3.12.7" # mature wheels for all deps; floors in requirements.txt allow it
+      # ── Secrets — set in the Render dashboard, never in git ──────────────────
+      - key: DATABASE_URL
+        sync: false # Postgres connection string (see DEPLOYMENT.md for which role)
+      - key: SUPABASE_JWT_SECRET
+        sync: false # Supabase → Project Settings → API → JWT Secret
+      - key: FRONTEND_ORIGIN
+        sync: false # exact Vercel origin(s), comma-separated; no trailing slash
+      - key: ANTHROPIC_API_KEY
+        sync: false # optional until the weekly-synthesis feature is enabled
+      - key: SYNTHESIS_PROMPT_PATH
+        sync: false # optional; absolute path to the private system prompt
+      # ── Non-secret tunables ─────────────────────────────────────────────────
+      - key: MAX_MONTHLY_TOKENS
+        value: "2000000"
+      - key: DAILY_TOKEN_BUDGET_PER_USER
+        value: "60000"

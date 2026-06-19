@@ -1,0 +1,12 @@
+# Keep secrets, local state, and caches OUT of the built image.
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.log
+.pytest_cache/
+uv.*.log
+uvicorn.*.log

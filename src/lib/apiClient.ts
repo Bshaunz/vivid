@@ -33,6 +33,8 @@ export interface MorningPayload {
   date: string;
   morning_readiness: number;
   sleep_hours: number;
+  // Strictly optional "Anything else?" extras.
+  morning_note?: string | null;
   rhr?: number | null;
   hrv?: number | null;
   bodyweight?: number | null;
@@ -41,6 +43,7 @@ export interface MorningPayload {
 export interface EveningPayload {
   date: string;
   training_done: boolean;
+  workout_status?: "trained" | "rest" | "skipped" | null;
   deep_work_hours: number;
   discretionary_spend: number;
   macro_adherence?: boolean | null;

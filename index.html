@@ -7,6 +7,14 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no"
     />
     <meta name="theme-color" content="#000000" />
+    <!-- "Add to Home Screen" → full-bleed standalone app. The manifest's
+         display:standalone covers Android/Chrome; iOS Safari needs these
+         apple-* meta tags to hide the browser chrome and own the status bar. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="VIVID" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>VIVID</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

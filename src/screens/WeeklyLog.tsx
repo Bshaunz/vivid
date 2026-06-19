@@ -213,6 +213,9 @@ function WeeklyForm({
       {/* 1 — Read-only anchors: the week as it actually happened */}
       <AnchorGrid summary={summary} unit={unit} />
 
+      {/* Token-contract quota for the evening log (persisted to the profile) */}
+      <TokenTargets />
+
       <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col gap-4">
         {/* 2 — Capital allocated: large decimal keypad */}
         <div className="flex flex-col gap-2">
@@ -253,5 +256,109 @@ function WeeklyForm({
         </button>
       </form>
     </main>
+  );
+}
+
+// ── Weekly token targets (profile-backed) ─────────────────────────────────────
+
+const DEFAULT_WORKOUT_TARGET = 4;
+const DEFAULT_REST_TARGET = 3;
+
+function clampInt(raw: string, lo: number, hi: number): number {
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : lo;
+}
+
+/**
+ * The weekly workout/rest quota that drives the evening token tracker. Persisted
+ * on the profile (not weekly_logs), so it carries forward as the default. Once
+ * set, the inputs collapse to a compact summary with an Edit affordance.
+ */
+function TokenTargets() {
+  const { profile, data, refresh } = useApp();
+  const curW = profile?.weekly_workout_target ?? null;
+  const curR = profile?.weekly_rest_target ?? null;
+  const isSet = curW !== null && curR !== null;
+
+  const [editing, setEditing] = useState(!isSet);
+  const [workouts, setWorkouts] = useState(String(curW ?? DEFAULT_WORKOUT_TARGET));
+  const [rest, setRest] = useState(String(curR ?? DEFAULT_REST_TARGET));
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const w = clampInt(workouts, 0, 7);
+    const r = clampInt(rest, 0, 7);
+    setSaving(true);
+    try {
+      await data.updateProfile({ weekly_workout_target: w, weekly_rest_target: r });
+      await refresh();
+      setWorkouts(String(w));
+      setRest(String(r));
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (isSet && !editing) {
+    return (
+      <section className="flex items-center justify-between rounded-[14px] border border-card-border bg-card p-4">
+        <div>
+          <p className="label mb-1">Weekly targets</p>
+          <p className="text-sm font-semibold text-white">
+            {curW} workouts · {curR} rest days
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="h-9 rounded-[8px] border border-card-border px-4 text-xs font-semibold uppercase tracking-wide text-white/70 active:bg-white/10"
+        >
+          Edit
+        </button>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-[14px] border border-card-border bg-card p-4">
+      <p className="label mb-3">Set this week's targets</p>
+      <div className="flex gap-3">
+        <TargetField label="Workouts / wk" value={workouts} onChange={setWorkouts} />
+        <TargetField label="Rest days / wk" value={rest} onChange={setRest} />
+      </div>
+      <button
+        type="button"
+        onClick={save}
+        disabled={saving}
+        className="mt-3 h-11 w-full rounded-[10px] bg-white text-sm font-bold text-black active:bg-white/80 disabled:opacity-50"
+      >
+        {saving ? "Saving…" : "Save targets"}
+      </button>
+    </section>
+  );
+}
+
+function TargetField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center gap-2">
+      <input
+        type="text"
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/[^\d]/g, ""))}
+        aria-label={label}
+        className="h-16 w-full rounded-[14px] border border-card-border bg-bg text-center text-4xl font-extrabold tabular-nums outline-none focus:border-accent"
+      />
+      <span className="label">{label}</span>
+    </div>
   );
 }

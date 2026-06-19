@@ -11,6 +11,7 @@ user, so no real token is needed.
 """
 import os
 import tempfile
+from datetime import date as dt_date
 
 import pytest
 
@@ -156,6 +157,14 @@ def test_profile_read_and_update(client):
     assert r.json()["bodyweight_goal"] == 180.0
     assert client.get("/api/profile").json()["daily_budget"] == 100.0
 
+    # weekly token targets default to null and round-trip; out-of-range rejected.
+    assert r.json()["weekly_workout_target"] is None
+    set_targets = client.put("/api/profile", json={"weekly_workout_target": 5, "weekly_rest_target": 2})
+    assert set_targets.status_code == 200
+    assert set_targets.json()["weekly_workout_target"] == 5
+    assert client.get("/api/profile").json()["weekly_rest_target"] == 2
+    assert client.put("/api/profile", json={"weekly_workout_target": 9}).status_code == 422
+
 
 def test_habits_crud_and_soft_delete(client):
     created = client.post(
@@ -164,6 +173,10 @@ def test_habits_crud_and_soft_delete(client):
     )
     assert created.status_code == 201
     hid = created.json()["id"]
+    # value_type defaults to binary; numeric metadata is null for completion habits.
+    assert created.json()["value_type"] == "binary"
+    assert created.json()["unit_label"] is None
+    assert created.json()["target_per_session"] is None
 
     assert any(h["id"] == hid for h in client.get("/api/habits?active_only=true").json())
 
@@ -177,6 +190,46 @@ def test_habits_crud_and_soft_delete(client):
     assert archived["is_active"] is False
 
 
+def test_numeric_habit_round_trips(client):
+    """A numeric habit persists its unit_label + per-session default, and the
+    tracking shape can be edited back to binary (clearing the numeric metadata)."""
+    created = client.post(
+        "/api/habits",
+        json={
+            "name": "Running",
+            "pillar": "Fitness",
+            "value_type": "numeric",
+            "unit_label": "miles",
+            "target_per_session": 1,
+        },
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["value_type"] == "numeric"
+    assert body["unit_label"] == "miles"
+    assert body["target_per_session"] == 1
+    hid = body["id"]
+
+    # per-session must be > 0 when supplied
+    assert (
+        client.post(
+            "/api/habits",
+            json={"name": "Bad", "value_type": "numeric", "target_per_session": 0},
+        ).status_code
+        == 422
+    )
+
+    # switch back to a completion habit, clearing the numeric metadata
+    edited = client.put(
+        f"/api/habits/{hid}",
+        json={"value_type": "binary", "unit_label": None, "target_per_session": None},
+    )
+    assert edited.status_code == 200
+    assert edited.json()["value_type"] == "binary"
+    assert edited.json()["unit_label"] is None
+    assert edited.json()["target_per_session"] is None
+
+
 def test_habit_completion_persists(client):
     hid = client.post("/api/habits", json={"name": "Cold shower"}).json()["id"]
     r = client.put(f"/api/habits/{hid}/completion", json={"date": "2026-06-10", "completed": True})
@@ -187,6 +240,37 @@ def test_habit_completion_persists(client):
     client.put(f"/api/habits/{hid}/completion", json={"date": "2026-06-10", "completed": False})
     rows = client.get("/api/habits/completions?from=2026-06-10&to=2026-06-10").json()
     assert sum(1 for c in rows if c["habit_id"] == hid) == 1
+
+
+def test_completion_quantity_round_trips(client):
+    """A numeric habit's per-session volume persists on the completion (Evening
+    wizard) and is echoed on save + read; omitting it yields null; negative is
+    rejected. The completion stays a binary done/not-done — quantity is extra."""
+    hid = client.post(
+        "/api/habits",
+        json={"name": "Run", "value_type": "numeric", "unit_label": "miles"},
+    ).json()["id"]
+
+    # quantity rides along with the completion …
+    r = client.put(
+        f"/api/habits/{hid}/completion",
+        json={"date": "2026-06-11", "completed": True, "quantity": 5.5},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["completed"] is True and r.json()["quantity"] == 5.5
+    rows = client.get("/api/habits/completions?from=2026-06-11&to=2026-06-11").json()
+    assert any(c["habit_id"] == hid and c["quantity"] == 5.5 for c in rows)
+
+    # … the upsert can clear it back to null (quantity omitted → null) …
+    cleared = client.put(f"/api/habits/{hid}/completion", json={"date": "2026-06-11", "completed": True})
+    assert cleared.status_code == 200 and cleared.json()["quantity"] is None
+
+    # … and a negative quantity is rejected before any write.
+    bad = client.put(
+        f"/api/habits/{hid}/completion",
+        json={"date": "2026-06-11", "completed": True, "quantity": -1},
+    )
+    assert bad.status_code == 422
 
 
 def test_goals_crud_display_only(client):
@@ -204,10 +288,82 @@ def test_goals_crud_display_only(client):
     )
     assert created.status_code == 201
     gid = created.json()["id"]
+    assert created.json()["is_recurring"] is False  # defaults off
     # shape validation mirrors the DB check constraint
     bad = client.post("/api/goals", json={"name": "broken", "type": "metric", "target_date": "2026-09-01"})
     assert bad.status_code == 422
+
+    # is_recurring round-trips through POST and toggles via PUT.
+    rec = client.post(
+        "/api/goals",
+        json={
+            "name": "Run weekly",
+            "type": "metric",
+            "metric_key": "deep_work_hours",
+            "target_value": 8,
+            "direction": "above",
+            "target_date": "2026-09-01",
+            "is_recurring": True,
+        },
+    )
+    assert rec.status_code == 201
+    assert rec.json()["is_recurring"] is True
+    rid = rec.json()["id"]
+    toggled = client.put(f"/api/goals/{rid}", json={"is_recurring": False})
+    assert toggled.status_code == 200
+    assert toggled.json()["is_recurring"] is False
+
     assert client.delete(f"/api/goals/{gid}").status_code == 204
+    assert client.delete(f"/api/goals/{rid}").status_code == 204
+
+
+def test_active_goal_focus_limits(client):
+    """Step-13 polish guardrails on POST /api/goals: ≤2 active goals per exact
+    target (habit_id / metric_key) and ≤10 active goals globally. Inactive goals
+    are unconstrained. Only the active working set is capped."""
+    from app.models import Goal
+
+    client.get("/api/profile")  # ensure dev user exists
+
+    def clear_goals() -> None:
+        with SessionLocal() as db:
+            db.query(Goal).delete()
+            db.commit()
+
+    def metric_goal(key: str, *, active: bool = True):
+        return client.post(
+            "/api/goals",
+            json={
+                "name": f"g-{key}",
+                "type": "metric",
+                "metric_key": key,
+                "target_value": 10,
+                "direction": "above",
+                "target_date": "2026-12-31",
+                "is_active": active,
+            },
+        )
+
+    # (a) per-target cap — 2 active goals on the same metric_key are fine, 3rd 422s.
+    clear_goals()
+    assert metric_goal("sleep_hours").status_code == 201
+    assert metric_goal("sleep_hours").status_code == 201
+    third = metric_goal("sleep_hours")
+    assert third.status_code == 422
+    assert "2 active goals" in third.json()["detail"]
+
+    # (b) global cap — 10 active goals (distinct targets) allowed, 11th 422s.
+    clear_goals()
+    for i in range(10):
+        assert metric_goal(f"metric_{i}").status_code == 201, i
+    eleventh = metric_goal("metric_overflow")
+    assert eleventh.status_code == 422
+    assert "10 active goals" in eleventh.json()["detail"]
+
+    # (c) an INACTIVE goal is never blocked, even sitting at the global cap.
+    assert metric_goal("metric_parked", active=False).status_code == 201
+
+    clear_goals()
 
 
 def test_weekly_upsert_and_summary(client):
@@ -246,3 +402,85 @@ def test_dashboard_returns_analysis_rows_and_scores(client):
     assert "2026-06-10" in pts
     assert 0 <= pts["2026-06-10"]["day_score"] <= 100
     assert pts["2026-06-10"]["fitness"] is not None  # evening logged that day
+
+
+def test_morning_note_round_trips(client):
+    """The wizard's optional "Anything else?" note persists to
+    daily_logs.morning_note and is echoed back on save + on read. No bodyweight
+    is sent, so this upsert leaves the week's single bodyweight sample intact."""
+    note = "Slept poorly but pushed through. Knees a bit stiff."
+    r = client.post(
+        "/api/logs/morning",
+        json={
+            "date": "2026-06-10",  # upsert onto the existing row (no new bodyweight)
+            "morning_readiness": 8,
+            "sleep_hours": 7.5,
+            "morning_note": note,
+        },
+    )
+    assert r.status_code == 200, r.text
+    # echoed on the save response …
+    assert r.json()["log"]["morning_note"] == note
+    # … persisted to the column …
+    with SessionLocal() as db:
+        row = db.query(DailyLog).filter(DailyLog.date == dt_date(2026, 6, 10)).one()
+        assert row.morning_note == note
+    # … and surfaced on the read endpoint.
+    assert client.get("/api/logs/2026-06-10").json()["morning_note"] == note
+
+    # the note is strictly optional — omitting it is valid and clears nothing else.
+    assert client.post(
+        "/api/logs/morning",
+        json={"date": "2026-06-10", "morning_readiness": 8, "sleep_hours": 7.5},
+    ).status_code == 200
+
+    # over the 1000-char cap → rejected before any write (Pydantic max_length).
+    assert client.post(
+        "/api/logs/morning",
+        json={
+            "date": "2026-06-10",
+            "morning_readiness": 8,
+            "sleep_hours": 7.5,
+            "morning_note": "x" * 1001,
+        },
+    ).status_code == 422
+
+
+def test_workout_status_drives_fitness_training_block(client):
+    """The token-contract status logs the §6.5 rest/skip distinction explicitly:
+    skipped → training block 0.0, rest → 0.5, trained → 1.0, independent of any
+    habit schedule. It also round-trips on the day row."""
+
+    def training_block(status: str, training_done: bool) -> float:
+        r = client.post(
+            "/api/logs/evening",
+            json={
+                "date": "2026-06-15",  # a fresh ISO week, isolated from other rows
+                "training_done": training_done,
+                "workout_status": status,
+                "deep_work_hours": 4,
+                "discretionary_spend": 0,
+            },
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["scores"]["pillars"]["Fitness"]["blocks"]["training"]
+
+    assert training_block("skipped", False) == pytest.approx(0.0)
+    assert training_block("rest", False) == pytest.approx(0.5)
+    assert training_block("trained", True) == pytest.approx(1.0)
+    assert client.get("/api/logs/2026-06-15").json()["workout_status"] == "trained"
+
+    # bad status is rejected before any write
+    assert (
+        client.post(
+            "/api/logs/evening",
+            json={
+                "date": "2026-06-15",
+                "training_done": True,
+                "workout_status": "lazy",
+                "deep_work_hours": 4,
+                "discretionary_spend": 0,
+            },
+        ).status_code
+        == 422
+    )

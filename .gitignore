@@ -5,6 +5,7 @@ dev-dist
 .env
 .env.*
 !.env.example
+!.env.production
 .DS_Store
 
 # Backend (Python)

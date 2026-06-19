@@ -107,6 +107,7 @@ def save_morning(
     log.sleep_hours = payload.sleep_hours
     log.rhr = payload.rhr
     log.hrv = payload.hrv
+    log.morning_note = payload.morning_note
     log.morning_done = True
     if payload.bodyweight is not None:
         _add_bodyweight(db, user.id, payload.bodyweight, payload.date)
@@ -125,6 +126,7 @@ def save_evening(
 ) -> LogSaveResponse:
     log = _get_or_create_log(db, user.id, payload.date)
     log.training_done = payload.training_done
+    log.workout_status = payload.workout_status
     log.deep_work_hours = payload.deep_work_hours
     log.discretionary_spend = payload.discretionary_spend
     log.macro_adherence = payload.macro_adherence

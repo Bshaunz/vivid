@@ -93,8 +93,10 @@ function emptyDailyLog(date: string): DailyLog {
     sleep_hours: null,
     rhr: null,
     hrv: null,
+    morning_note: null,
     morning_done: false,
     training_done: null,
+    workout_status: null,
     workout_rpe: null,
     deep_work_hours: null,
     macro_adherence: null,
@@ -185,6 +187,7 @@ export class LocalStorageDataLayer implements DataLayer {
       log.sleep_hours = input.sleep_hours;
       log.rhr = input.rhr ?? null;
       log.hrv = input.hrv ?? null;
+      log.morning_note = input.morning_note ?? null;
       log.morning_done = true;
     });
   }
@@ -197,6 +200,7 @@ export class LocalStorageDataLayer implements DataLayer {
 
     return this.upsertDailyLog(date, (log) => {
       log.training_done = input.training_done;
+      log.workout_status = input.workout_status ?? null;
       log.deep_work_hours = input.deep_work_hours;
       log.discretionary_spend = input.discretionary_spend;
       log.macro_adherence = input.macro_adherence ?? null;
@@ -290,7 +294,12 @@ export class LocalStorageDataLayer implements DataLayer {
 
   // ── Habit completions ────────────────────────────────────────────────────
 
-  async setHabitCompletion(habitId: number, date: string, completed: boolean): Promise<HabitCompletion> {
+  async setHabitCompletion(
+    habitId: number,
+    date: string,
+    completed: boolean,
+    quantity: number | null = null,
+  ): Promise<HabitCompletion> {
     const habits = read<Habit[]>("habits", []);
     assert(habits.some((h) => h.id === habitId), `setHabitCompletion: habit ${habitId} not found`);
 
@@ -298,8 +307,9 @@ export class LocalStorageDataLayer implements DataLayer {
     let row = completions.find((c) => c.habit_id === habitId && c.date === date);
     if (row) {
       row.completed = completed;
+      row.quantity = quantity;
     } else {
-      row = { id: nextId(), user_id: LOCAL_USER_ID, habit_id: habitId, date, completed };
+      row = { id: nextId(), user_id: LOCAL_USER_ID, habit_id: habitId, date, completed, quantity };
       completions.push(row);
     }
     write("habit_completions", completions);
@@ -374,6 +384,21 @@ export class LocalStorageDataLayer implements DataLayer {
       assert(input.habit_id !== null, "habit goal requires habit_id");
     }
     const goals = read<Goal[]>("goals", []);
+
+    // Focus guardrails (step 13) — mirror POST /api/goals. Only active goals count.
+    if (input.is_active) {
+      const active = goals.filter((g) => g.is_active);
+      assert(
+        active.length < 10,
+        "Maximum of 10 active goals reached. Archive a goal to create a new one.",
+      );
+      const same =
+        input.type === "habit"
+          ? active.filter((g) => g.type === "habit" && g.habit_id === input.habit_id).length
+          : active.filter((g) => g.type === "metric" && g.metric_key === input.metric_key).length;
+      assert(same < 2, `This ${input.type} already has the maximum of 2 active goals.`);
+    }
+
     const goal: Goal = {
       ...input,
       id: nextId(),
