@@ -1,6 +1,7 @@
 """Environment-driven settings. All secrets live in env vars (§3.2)."""
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,7 +10,14 @@ class Settings(BaseSettings):
 
     dev_mode: bool = False
     database_url: str = "sqlite:///./vivid_dev.db"
-    frontend_origin: str = "http://localhost:5173"
+    # The prod CORS origin. Accept BOTH the canonical FRONTEND_ORIGIN and the
+    # common FRONTEND_URL misspelling so a single dashboard typo can't silently
+    # fall back to the localhost default and 400 every preflight (extra="ignore"
+    # would otherwise drop an unrecognized name). FRONTEND_ORIGIN wins if both set.
+    frontend_origin: str = Field(
+        default="http://localhost:5173",
+        validation_alias=AliasChoices("FRONTEND_ORIGIN", "FRONTEND_URL"),
+    )
 
     supabase_jwt_secret: str = ""
 
@@ -27,7 +35,7 @@ class Settings(BaseSettings):
         """Production allow-list. Supports a comma-separated FRONTEND_ORIGIN so
         the Vercel app + any preview domains can be listed explicitly — never a
         wildcard in prod (§3.1)."""
-        return [o.strip() for o in self.frontend_origin.split(",") if o.strip()]
+        return [o.strip().rstrip("/") for o in self.frontend_origin.split(",") if o.strip()]
 
 
 @lru_cache

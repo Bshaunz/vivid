@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -49,6 +51,15 @@ if settings.dev_mode:
     )
 else:
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, **_cors)
+
+# Surface the effective CORS allow-list in the platform logs at boot. A preflight
+# 400 ("Disallowed CORS origin") is almost always this list not containing the
+# caller's exact Origin — printing it turns a silent misconfig into one log line.
+logging.getLogger("uvicorn.error").info(
+    "CORS mode=%s allow_origins=%s",
+    "dev(localhost-regex)" if settings.dev_mode else "prod",
+    "<localhost-regex>" if settings.dev_mode else settings.cors_origins,
+)
 
 
 @app.get("/healthz")

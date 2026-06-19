@@ -10,8 +10,12 @@ services:
     rootDir: backend
     plan: free # bump to "starter" for always-on + preDeployCommand support
     region: oregon
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    # `python -m uvicorn` (not bare `uvicorn`) starts the server through the
+    # interpreter pip installed into — immune to the "uvicorn: command not found"
+    # PATH error. `rootDir: backend` makes `app.main:app` the correct import path
+    # (entry point is backend/app/main.py → `app = FastAPI(...)`).
+    startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     autoDeploy: true
     # On a paid plan you can migrate automatically before each release instead

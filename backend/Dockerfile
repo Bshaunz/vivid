@@ -12,12 +12,14 @@ WORKDIR /app
 
 # Install deps first so the layer caches across code changes.
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
 # App code (.dockerignore keeps .env, .venv, *.db, logs OUT of the image).
 COPY . .
 
 EXPOSE 8000
 
-# Hosts inject $PORT; default to 8000 for local `docker run`.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# `python -m uvicorn` invokes the server via the interpreter (immune to PATH /
+# "command not found"). Hosts inject $PORT; default 8000 for local `docker run`.
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
