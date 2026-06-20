@@ -1,4 +1,5 @@
 import logging
+import os
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -102,7 +103,10 @@ _log.info(
 
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"status": "ok"}
+    # `commit` exposes the deployed git SHA (Render injects RENDER_GIT_COMMIT) so a
+    # deploy is verifiable from outside: curl /healthz and compare to the latest
+    # commit. If it lags or shows "unknown", the new code didn't actually go live.
+    return {"status": "ok", "commit": os.environ.get("RENDER_GIT_COMMIT", "unknown")[:12]}
 
 
 @app.get("/me")
