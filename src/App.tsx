@@ -17,7 +17,7 @@ const Pillars = lazy(() => import("@/screens/Pillars"));
 const Log = lazy(() => import("@/screens/Log"));
 const Goals = lazy(() => import("@/screens/Goals"));
 const AISynthesis = lazy(() => import("@/screens/AISynthesis"));
-const Placeholder = lazy(() => import("@/screens/Placeholder"));
+const Settings = lazy(() => import("@/screens/Settings"));
 
 function RouteFallback() {
   return (
@@ -39,10 +39,7 @@ export default function App() {
             <Route path="/log" element={<Log />} />
             <Route path="/goals" element={<Goals />} />
             <Route path="/ai" element={<AISynthesis />} />
-            <Route
-              path="/settings"
-              element={<Placeholder title="Settings" note="Pillars, habits, budget, bodyweight goal, units, export and account deletion arrive in build step 14." />}
-            />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </Suspense>
       </main>
