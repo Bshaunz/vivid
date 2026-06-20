@@ -50,15 +50,25 @@ if settings.dev_mode:
         **_cors,
     )
 else:
-    app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, **_cors)
+    # Allow an origin if it's in the exact FRONTEND_ORIGIN list OR matches the
+    # optional FRONTEND_ORIGIN_REGEX (Starlette checks both). The regex covers
+    # Vercel preview/deployment URLs that vary per deploy. `or None` keeps the
+    # arg absent when unset, so the exact-list behaviour is unchanged by default.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_origin_regex=settings.frontend_origin_regex or None,
+        **_cors,
+    )
 
 # Surface the effective CORS allow-list in the platform logs at boot. A preflight
 # 400 ("Disallowed CORS origin") is almost always this list not containing the
 # caller's exact Origin — printing it turns a silent misconfig into one log line.
 logging.getLogger("uvicorn.error").info(
-    "CORS mode=%s allow_origins=%s",
+    "CORS mode=%s allow_origins=%s allow_origin_regex=%s",
     "dev(localhost-regex)" if settings.dev_mode else "prod",
     "<localhost-regex>" if settings.dev_mode else settings.cors_origins,
+    "<localhost-regex>" if settings.dev_mode else (settings.frontend_origin_regex or None),
 )
 
 

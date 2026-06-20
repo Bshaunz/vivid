@@ -18,6 +18,12 @@ class Settings(BaseSettings):
         default="http://localhost:5173",
         validation_alias=AliasChoices("FRONTEND_ORIGIN", "FRONTEND_URL"),
     )
+    # Prod regex for origins that vary per deploy — Vercel rotates the URL
+    # (vivid-mocha, vivid-git-<branch>, vivid-<hash>…). An origin is allowed if
+    # it matches the exact FRONTEND_ORIGIN list OR this pattern. Defaults to THIS
+    # project's Vercel domains so prod CORS works the moment this code deploys,
+    # with no env var to set. Override FRONTEND_ORIGIN_REGEX to change it.
+    frontend_origin_regex: str = r"https://vivid[a-z0-9-]*\.vercel\.app"
 
     supabase_jwt_secret: str = ""
 

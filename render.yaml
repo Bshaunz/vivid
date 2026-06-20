@@ -33,6 +33,9 @@ services:
         sync: false # Supabase → Project Settings → API → JWT Secret
       - key: FRONTEND_ORIGIN
         sync: false # exact Vercel origin(s), comma-separated; no trailing slash
+      - key: FRONTEND_ORIGIN_REGEX
+        sync: false # optional: regex for Vercel preview URLs, e.g.
+        #   https://vivid(-[a-z0-9-]+)?\.vercel\.app  — matched IN ADDITION to the list
       - key: ANTHROPIC_API_KEY
         sync: false # optional until the weekly-synthesis feature is enabled
       - key: SYNTHESIS_PROMPT_PATH
