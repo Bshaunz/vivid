@@ -139,7 +139,23 @@ def get_current_user(
         )
 
     sub = payload.get("sub")
-    user = db.get(User, sub)
+    # The token is valid here; this is the FIRST real DB hit per request. A crash
+    # now is a Postgres problem, not an auth one — most often DATABASE_URL being
+    # unreachable (use the Supabase session POOLER host, not the IPv6-only direct
+    # db.<ref>.supabase.co), or a uuid/type mismatch. Name it explicitly so the
+    # Render log says which, then surface a clean 503 (keeps CORS headers).
+    try:
+        user = db.get(User, sub)
+    except Exception:
+        _log.exception(
+            "AUTH: user lookup failed for sub=%s — check DATABASE_URL is the "
+            "Supabase pooler URL and Postgres is reachable",
+            sub,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Auth backend unavailable.",
+        )
     # TEMP DIAGNOSTIC: token verified — was the user provisioned in public.users?
     # user_found=False means migration 0008's signup trigger didn't create the row.
     _log.info("AUTH: token ok sub=%s user_found=%s", sub, user is not None)

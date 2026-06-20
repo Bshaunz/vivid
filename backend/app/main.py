@@ -1,10 +1,12 @@
 import logging
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.auth import get_current_user
 from app.config import get_settings
@@ -22,6 +24,7 @@ from app.routers import (
 )
 
 settings = get_settings()
+_log = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="VIVID API", docs_url="/docs" if settings.dev_mode else None)
 app.state.limiter = limiter
@@ -30,6 +33,31 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Global 60/min per client across every endpoint (§3.4). AI endpoints will
 # override with a stricter 10/min at their own routes.
 app.add_middleware(SlowAPIMiddleware)
+
+
+# Last-resort error logger. Added AFTER SlowAPI but BEFORE CORS, so the stack is
+# CORS → this → SlowAPI → routes: the 500 it returns flows back out THROUGH
+# CORSMiddleware and keeps its Access-Control-Allow-Origin header. (A raw
+# unhandled 500 from Starlette's outermost handler would NOT — it would reach the
+# browser as a fresh "CORS error" masking the real Python crash.) The full
+# traceback + offending method/path land in the Render logs so a Postgres/type
+# error is diagnosable instead of silent. A 500 never kills the worker; this only
+# makes the cause visible. Trim the verbosity once the backend is stable.
+async def _catch_and_log(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:  # noqa: BLE001 — deliberate catch-all for visibility
+        _log.error(
+            "UNHANDLED %s on %s %s",
+            type(exc).__name__,
+            request.method,
+            request.url.path,
+            exc_info=exc,
+        )
+        return JSONResponse(status_code=500, content={"detail": "Internal server error."})
+
+
+app.add_middleware(BaseHTTPMiddleware, dispatch=_catch_and_log)
 
 # CORS (§3.1). The previous single hardcoded origin blocked the browser whenever
 # the dev origin varied (127.0.0.1 vs localhost, a non-5173 Vite port), which
@@ -64,7 +92,7 @@ else:
 # Surface the effective CORS allow-list in the platform logs at boot. A preflight
 # 400 ("Disallowed CORS origin") is almost always this list not containing the
 # caller's exact Origin — printing it turns a silent misconfig into one log line.
-logging.getLogger("uvicorn.error").info(
+_log.info(
     "CORS mode=%s allow_origins=%s allow_origin_regex=%s",
     "dev(localhost-regex)" if settings.dev_mode else "prod",
     "<localhost-regex>" if settings.dev_mode else settings.cors_origins,

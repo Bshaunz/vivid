@@ -28,7 +28,16 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+# Portable UUID column: native `uuid` on Postgres, plain CHAR(36) string on
+# SQLite (dev). On Postgres this makes SQLAlchemy/psycopg bind id parameters as
+# `uuid`, so `WHERE id = :param` no longer fails with
+# "operator does not exist: uuid = character varying". as_uuid=False keeps the
+# Python value a plain str everywhere, so all id handling stays string-based and
+# unchanged (and the dev SQLite DDL/behaviour is byte-for-byte what it was).
+_UUID = String(36).with_variant(PGUUID(as_uuid=False), "postgresql")
 
 
 def utcnow() -> datetime:
@@ -60,7 +69,7 @@ class Base(DeclarativeBase):
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    id: Mapped[str] = mapped_column(_UUID, primary_key=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str | None] = mapped_column(String(80))
     currency: Mapped[str] = mapped_column(
@@ -105,7 +114,7 @@ class DailyLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        _UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     date: Mapped[date] = mapped_column(Date, nullable=False)
 
@@ -189,7 +198,7 @@ class BodyweightEntry(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        _UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     logged_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
@@ -207,7 +216,7 @@ class Habit(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        _UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -247,7 +256,7 @@ class HabitCompletion(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        _UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     habit_id: Mapped[int] = mapped_column(
         ForeignKey("habits.id", ondelete="CASCADE"), nullable=False
@@ -271,7 +280,7 @@ class WeeklyLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        _UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     week_start: Mapped[date] = mapped_column(Date, nullable=False)  # ISO Monday
     capital_allocated: Mapped[float] = mapped_column(Float, nullable=False)
@@ -297,7 +306,7 @@ class Goal(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        _UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     type: Mapped[str] = mapped_column(
@@ -342,7 +351,7 @@ class Baseline(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        _UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     metric_key: Mapped[str] = mapped_column(String(64), nullable=False)
     window_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
@@ -371,7 +380,7 @@ class AISynthesis(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        _UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
