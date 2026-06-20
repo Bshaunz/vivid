@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     frontend_origin_regex: str = r"https://vivid[a-z0-9-]*\.vercel\.app"
 
     supabase_jwt_secret: str = ""
+    # Project base URL, e.g. https://<ref>.supabase.co — used to fetch the JWKS
+    # for verifying ASYMMETRIC (ES256/RS256) tokens, which newer Supabase
+    # projects issue. Same value as the frontend's VITE_SUPABASE_URL. Optional:
+    # when blank, only the legacy HS256 shared-secret path is available.
+    supabase_url: str = ""
 
     anthropic_api_key: str = ""
     synthesis_prompt_path: str = ""

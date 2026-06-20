@@ -8,17 +8,25 @@ DEV_MODE=true, every request 503s.
 """
 import logging
 import os
+from functools import lru_cache
 
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.db import get_db
 from app.models import User, utcnow
 
 _log = logging.getLogger("uvicorn.error")
+
+# Supabase access-token audience claim (constant across projects).
+_AUDIENCE = "authenticated"
+# Asymmetric algorithms newer Supabase projects sign with. Their verification
+# key comes from the project's public JWKS — never the shared secret. Binding
+# the key SOURCE to the algorithm is what blocks JWT algorithm-confusion attacks.
+_ASYMMETRIC_ALGS = ("ES256", "RS256", "EdDSA")
 
 # Render/Vercel inject these on their platforms; their presence means this
 # process is NOT a local dev box.
@@ -41,6 +49,46 @@ def _get_or_create_dev_user(db: Session) -> User:
         db.add(user)
         db.commit()
     return user
+
+
+class _AuthConfigError(Exception):
+    """Server-side auth misconfiguration (missing secret / URL) → 503, not 401:
+    the token may be perfectly valid; the server just can't verify it yet."""
+
+
+@lru_cache(maxsize=4)
+def _jwks_client(jwks_url: str) -> jwt.PyJWKClient:
+    # One cached client per JWKS URL; PyJWKClient also caches the fetched keys,
+    # so Supabase's JWKS endpoint is hit at most once per key rotation, not per
+    # request.
+    return jwt.PyJWKClient(jwks_url)
+
+
+def _decode_token(token: str, settings: Settings) -> dict:
+    """Verify a Supabase access token, supporting BOTH signing schemes.
+
+    The token header's `alg` selects the path AND the key source:
+      • HS256        → the legacy shared secret (SUPABASE_JWT_SECRET).
+      • ES256/RS256  → the project's public JWKS (needs SUPABASE_URL set).
+    Newer Supabase projects issue asymmetric (ES256) tokens; older ones HS256.
+    Either works here without redeploying when a project migrates its keys.
+    """
+    alg = jwt.get_unverified_header(token).get("alg", "")
+
+    if alg == "HS256":
+        if not settings.supabase_jwt_secret:
+            raise _AuthConfigError("SUPABASE_JWT_SECRET is empty but received an HS256 token")
+        key: object = settings.supabase_jwt_secret
+    elif alg in _ASYMMETRIC_ALGS:
+        if not settings.supabase_url:
+            raise _AuthConfigError(f"SUPABASE_URL is empty but token alg={alg} needs the JWKS")
+        jwks_url = settings.supabase_url.rstrip("/") + "/auth/v1/.well-known/jwks.json"
+        key = _jwks_client(jwks_url).get_signing_key_from_jwt(token).key
+    else:
+        raise jwt.InvalidAlgorithmError(f"unsupported token alg {alg!r}")
+
+    # leeway absorbs minor Render↔Supabase clock skew on exp/iat/nbf.
+    return jwt.decode(token, key, algorithms=[alg], audience=_AUDIENCE, leeway=30)
 
 
 def get_current_user(
@@ -66,25 +114,26 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token."
         )
-    if not settings.supabase_jwt_secret:
-        _log.error("AUTH: SUPABASE_JWT_SECRET is empty — cannot verify tokens")
+    try:
+        payload = _decode_token(credentials.credentials, settings)
+    except _AuthConfigError as exc:
+        _log.error("AUTH: not configured — %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Auth is not configured.",
         )
-
-    try:
-        payload = jwt.decode(
-            credentials.credentials,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
     except jwt.PyJWTError as exc:
-        # TEMP DIAGNOSTIC: names the exact reason — a signature error means the
-        # JWT secret is wrong or the project uses asymmetric (ES256/RS256) keys
-        # this HS256 path can't verify; an audience error means aud != authenticated.
+        # TEMP DIAGNOSTIC (Render logs) — the exact decode failure:
+        #   InvalidSignatureError → wrong SUPABASE_JWT_SECRET (HS256) / wrong key
+        #   InvalidAlgorithmError → token alg unsupported (set SUPABASE_URL for ES256)
+        #   ExpiredSignatureError → expired token (refresh / clock skew)
+        #   InvalidAudienceError  → aud != "authenticated"
         _log.warning("AUTH: token rejected (%s): %s", type(exc).__name__, exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token."
+        )
+    except Exception as exc:  # JWKS fetch/parse/network failures
+        _log.warning("AUTH: token verification error (%s): %s", type(exc).__name__, exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token."
         )

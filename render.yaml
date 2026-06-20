@@ -30,7 +30,11 @@ services:
       - key: DATABASE_URL
         sync: false # Postgres connection string (see DEPLOYMENT.md for which role)
       - key: SUPABASE_JWT_SECRET
-        sync: false # Supabase → Project Settings → API → JWT Secret
+        sync: false # HS256 path: Supabase → Project Settings → API → JWT Secret (legacy)
+      - key: SUPABASE_URL
+        sync: false # ES256/RS256 path: https://<ref>.supabase.co (same as VITE_SUPABASE_URL)
+        #   Set BOTH — the backend picks the scheme per-token, so it works whether
+        #   the project signs with the legacy secret or the new asymmetric keys.
       - key: FRONTEND_ORIGIN
         sync: false # exact Vercel origin(s), comma-separated; no trailing slash
       - key: FRONTEND_ORIGIN_REGEX
