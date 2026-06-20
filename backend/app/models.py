@@ -28,7 +28,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.dialects.postgresql import ENUM as PGENUM, UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Portable UUID column: native `uuid` on Postgres, plain CHAR(36) string on
@@ -57,9 +57,17 @@ BASELINE_METRIC_KEYS = (
 
 
 def str_enum(*values: str, name: str) -> Enum:
-    """Portable enum: VARCHAR + CHECK on SQLite, plain varchar check on PG.
-    The launch Postgres schema uses native enums via the SQL migration."""
-    return Enum(*values, name=name, native_enum=False, validate_strings=True)
+    """Portable enum that MATCHES the deployed column on each backend:
+      • SQLite (dev): VARCHAR + CHECK (native_enum=False).
+      • Postgres: the NATIVE enum type the SQL migrations already created.
+    The native variant is essential — psycopg binds Python str as `text`, and a
+    native-enum column rejects text ("column is of type pillar_type but
+    expression is of type character varying") on insert/filter. create_type=False
+    because the migration owns the type; SQLAlchemy must not emit CREATE/DROP TYPE.
+    """
+    return Enum(*values, name=name, native_enum=False, validate_strings=True).with_variant(
+        PGENUM(*values, name=name, create_type=False), "postgresql"
+    )
 
 
 class Base(DeclarativeBase):
